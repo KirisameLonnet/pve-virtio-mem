@@ -1,3 +1,10 @@
+pve-virtio-mem (0.1.0~alpha2-1) trixie; urgency=high
+
+  * Append virtio-mem after PVE and custom PCI devices to avoid address clashes.
+  * Add a QEMU regression with explicitly addressed VGA and IVSHMEM devices.
+
+ -- KirisameLonnet <KirisameLonnet@users.noreply.github.com>  Tue, 13 Oct 2026 04:15:00 +0000
+
 pve-virtio-mem (0.1.0~alpha1-1) trixie; urgency=medium
 
   * Fork pve-microvm packaging for opt-in Q35 virtio-mem integration.

@@ -33,11 +33,16 @@ eval { PVE::QemuServer::VirtioMem::translate_balloon({%$conf, balloon=>8192},'ba
 like($@,qr/outside/,'honor minimum above base');
 my @command;
 PVE::QemuServer::VirtioMem::config($conf,9000,1,4,0,0,\@command,{});
+ok(!grep(/virtio-mem-pci/,@command),'memory builder defers automatic PCI placement');
+push @command, '-device', 'virtio-vga,id=vga,bus=pcie.0,addr=0x1';
+PVE::QemuServer::VirtioMem::add_device($conf,\@command);
+like($command[-1],qr/^virtio-mem-pci/,'memory device follows explicitly addressed devices');
 is_deeply([@command[0,1]],['-m','4096M,slots=1,maxmem=16384M'],'fixed boot RAM and maximum');
 like(join(' ',@command),qr/memory-backend-ram,id=vmem0,size=12288M,reserve=off,prealloc=off/,'sparse removable pool');
 like(join(' ',@command),qr/requested-size=0M/,'boot at configured minimum');
 @command=();
 PVE::QemuServer::VirtioMem::config({%$conf,balloon=>8192},9000,1,4,0,0,\@command,{});
+PVE::QemuServer::VirtioMem::add_device({%$conf,balloon=>8192},\@command);
 like(join(' ',@command),qr/requested-size=4096M/,'minimum above base starts partially plugged');
 for my $invalid ({'virtio-mem'=>16384},{balloon=>0},{balloon=>4097},{numa=>0},
                  {machine=>'pc'},{numa0=>'cpus=0-3'},{hugepages=>2},{ostype=>'win11'}) {

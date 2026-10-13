@@ -14,11 +14,18 @@ use JSON::PP;
 require $ARGV[0];
 sub PVE::QemuServer::Memory::get_current_memory { return $_[0]; }
 my @cmd;
+my $conf = { memory => 4096, 'virtio-mem' => 2048, balloon => 2048,
+             numa => 1, machine => 'q35', ostype => 'l26' };
 PVE::QemuServer::VirtioMem::config(
-    { memory => 4096, 'virtio-mem' => 2048, balloon => 2048,
-      numa => 1, machine => 'q35', ostype => 'l26' },
+    $conf,
     9000, 1, 2, 0, 0, \@cmd, {},
 );
+# Reproduce standard PVE VGA and custom IVSHMEM address reservations. The
+# memory device must be last: adding it earlier takes VGA's explicit slot.
+push @cmd, '-device', 'virtio-vga,id=vga,bus=pcie.0,addr=0x1';
+push @cmd, '-object', 'memory-backend-ram,id=shared0,size=4M,share=on';
+push @cmd, '-device', 'ivshmem-plain,id=shared-device,memdev=shared0,bus=pcie.0,addr=0x14';
+PVE::QemuServer::VirtioMem::add_device($conf,\@cmd);
 print encode_json(\@cmd);
 '''
 options = json.loads(subprocess.check_output(['perl','-e',code,str(repo/'tools/VirtioMem.pm')]))

@@ -41,12 +41,20 @@ sub config {
     for my $key (keys %$conf) {
         die "virtio-mem custom NUMA topology is not supported\n" if $key =~ /^numa\d+$/;
     }
-    my $requested = $minimum - $base;
     my $lastcpu = $cores - 1;
     push @$cmd, '-m', "${base}M,slots=1,maxmem=${maximum}M";
     push @$cmd, '-object', "memory-backend-ram,id=ram-node0,size=${base}M";
     push @$cmd, '-numa', "node,nodeid=0,cpus=0-$lastcpu,memdev=ram-node0";
     push @$cmd, '-object', "memory-backend-ram,id=vmem0,size=${pool}M,reserve=off,prealloc=off";
+    return;
+}
+
+# QEMU allocates automatic PCI addresses in command-line order. Append only
+# after PVE devices and custom args, so their explicit addresses are occupied.
+sub add_device {
+    my ($conf, $cmd) = @_;
+    my ($base, $pool, $maximum, $minimum) = layout($conf);
+    my $requested = $minimum - $base;
     # Static memslots work with the host's existing vhost limits. The discard
     # manager still coordinates actual VFIO unpinning for unplugged blocks.
     push @$cmd, '-device', "virtio-mem-pci,id=vmem0,memdev=vmem0,node=0,requested-size=${requested}M,block-size=${BLOCK_MIB}M,dynamic-memslots=off";

@@ -45,3 +45,13 @@
          # this fails if balloon driver is not loaded, so this must be
          # the last command (following command are aborted if this fails).
          $qmpclient->queue_cmd($qmp_peer, $ballooncb, 'query-balloon');
+@@ -3794,6 +3807,9 @@
+         my $aa = PVE::Tools::split_args($conf->{args});
+         push @$cmd, @$aa;
+     }
++
++    PVE::QemuServer::VirtioMem::add_device($conf, $cmd)
++        if PVE::QemuServer::VirtioMem::enabled($conf);
+ 
+     return wantarray ? ($cmd, $spice_port, $pci_devices, $conf) : $cmd;
+ }
