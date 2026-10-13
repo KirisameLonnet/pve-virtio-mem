@@ -11,5 +11,10 @@ debian/pve-microvm.substvars
 
 kernel/vmlinuz-microvm
 
-# Retained profiling evidence is separate from disposable build output.
+# Legacy upstream evidence is not part of the package.
 docs/evidence/
+
+# New package staging (normal builds run outside the checkout).
+debian/pve-virtio-mem/
+debian/pve-virtio-mem.debhelper.log
+debian/pve-virtio-mem.substvars
