@@ -6,6 +6,7 @@ permissions:
 jobs:
   profile:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - run: echo "PROJECT_TMP_BASE=$RUNNER_TEMP" >> "$GITHUB_ENV"

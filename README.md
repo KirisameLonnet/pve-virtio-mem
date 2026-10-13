@@ -28,7 +28,7 @@ make deb
 PROJECT_TMP_BASE=/private/tmp make test
 ```
 
-Debian 构建需要 `debhelper`、`dpkg-dev`、Perl、Python 3 和 GNU patch。
+Debian 构建需要 `build-essential`、`debhelper`、`dpkg-dev`、Perl、Python 3 和 GNU patch。
 生成的包位于项目独立临时目录的 `build/deb/` 下；GitHub CI 提供构建产物。
 
 | 检查 | 已验证范围 |
