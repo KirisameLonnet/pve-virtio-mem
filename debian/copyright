@@ -1,0 +1,18 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: pve-virtio-mem
+Source: https://github.com/KirisameLonnet/pve-virtio-mem
+
+Files: *
+Copyright: Rui Carmo and pve-microvm contributors
+           2026 KirisameLonnet
+License: Apache-2.0
+ See LICENSE for the complete Apache License, version 2.0.
+ On Debian systems it is also available at /usr/share/common-licenses/Apache-2.0.
+
+Files: patches/*
+Copyright: 2011-2026 Proxmox Server Solutions GmbH <support@proxmox.com>
+           2026 KirisameLonnet
+License: AGPL-3+
+ These patches contain context from Proxmox qemu-server and modifications to
+ that code. They are distributed under GNU Affero GPL version 3 or later.
+ See LICENSES/AGPL-3.0-or-later.txt for the complete license.

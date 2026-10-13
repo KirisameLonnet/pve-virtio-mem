@@ -1,0 +1,19 @@
+--- a/usr/share/perl5/PVE/QemuServer/Memory.pm
++++ b/usr/share/perl5/PVE/QemuServer/Memory.pm
+@@ -2,6 +2,7 @@
+ 
+ use strict;
+ use warnings;
++use PVE::QemuServer::VirtioMem;
+ 
+ use PVE::JSONSchema qw(parse_property_string);
+ use PVE::Tools qw(run_command lock_file lock_file_full file_read_firstline dir_glob_foreach);
+@@ -356,6 +357,8 @@
+ 
+ sub config {
+     my ($conf, $vmid, $sockets, $cores, $hotplug, $virtiofs_enabled, $cmd, $machine_flags) = @_;
++    return PVE::QemuServer::VirtioMem::config(@_)
++        if PVE::QemuServer::VirtioMem::enabled($conf);
+ 
+     my $memory = get_current_memory($conf->{memory});
+     my $static_memory = 0;

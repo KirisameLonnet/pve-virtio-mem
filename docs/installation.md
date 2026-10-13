@@ -1,74 +1,53 @@
-# Installation
+# Installation and package lifecycle
 
-## From GitHub Release
+This is an experimental development package. Start with a disposable Q35 Linux
+VM. GPU/VFIO reclamation and production lifecycle operations remain unvalidated.
 
-Download the latest `.deb` from the [releases page](https://github.com/rcarmo/pve-microvm/releases):
+Build on Debian with `make deb`, then install the resulting local package using
+`apt install ./pve-virtio-mem_*.deb`. CI artifacts are also available from the
+repository's Actions page. There is no stable release yet.
 
-```bash
-# Download and install the latest release
-curl -sLO $(curl -s https://api.github.com/repos/rcarmo/pve-microvm/releases/latest | grep browser_download_url | grep '.deb' | cut -d'"' -f4)
-dpkg -i pve-microvm_*.deb
-apt-get install -f   # resolve any missing dependencies
-```
+The package requires PVE 9, QEMU 10 or newer and qemu-server 9.1.17 or newer.
+Package-copy compatibility was tested with qemu-server 9.1.17 and 9.2.11 only;
+a version constraint is not a guarantee that future source layouts will work.
+It conflicts with pve-microvm because both edit the same PVE source files.
 
-## From source
+## What installation does
 
-```bash
-git clone https://github.com/rcarmo/pve-microvm.git
-cd pve-microvm
-make deb
-# Use the exact output directory printed by make deb:
-sudo dpkg -i <output-directory>/pve-microvm_*_all.deb
-```
+1. Install the small Perl adapter and standard unified patches.
+2. Verify PVE source against the installed Debian package checksums.
+3. Preflight every patch with zero fuzz before modifying any PVE file.
+4. Journal the originals and SHA-256 hashes in `/var/lib/pve-virtio-mem`.
+5. Apply patches and refresh existing PVE API/proxy/status services.
 
-## Manual (development)
+Running guests are not restarted. Existing VMs without `virtio-mem` keep their
+native memory builder and balloon commands. Package installation changes PVE
+Perl files, so this is not an official Proxmox extension API.
 
-```bash
-make install DESTDIR=/
-/usr/share/pve-microvm/pve-microvm-patch apply
-```
+The edits persist across boots. Debian file triggers reapply them when
+qemu-server is upgraded. No early-boot patch service or package hold is used.
+Unknown edits or incompatible upstream changes fail package configuration
+before writing patches. Resolve the version mismatch and rerun
+`dpkg --configure -a`; do not bypass checksum checks.
 
-## Verify
+Inspect state with `pve-virtio-mem-patch status`. An interrupted apply can be
+retried with `pve-virtio-mem-patch apply`; the journal distinguishes originals
+from patched files. File-by-file replacement is not a filesystem-wide atomic
+transaction: do not start guests during package maintenance.
 
-```bash
-/usr/share/pve-microvm/pve-microvm-patch status
-# Expected: applied (2026-04-18T...)
+## Removal
 
-qm create 999 --machine microvm --memory 128 --name test-microvm
-qm destroy 999
-```
+Shut down enabled VMs normally. Remove `virtio-mem` from their configuration
+with `qm set <vmid> --delete virtio-mem`, and resolve any snapshots retaining
+the option. Fully stop/start before expecting the original memory topology.
+Then remove the package using apt. The removal hook refuses to proceed while
+positive virtio-mem options remain in cluster guest configs or snapshots.
 
-## Uninstall
+Rollback verifies all file hashes before restoring anything. If an administrator
+or another package modified a managed file, reconcile it first; the tool will
+not overwrite it with a stale backup. A failed installation may require
+repairing qemu-server from its matching official package before retrying.
 
-```bash
-apt remove pve-microvm
-```
-
-The `prerm` hook automatically reverts all patches and restores the original
-`qemu-server` files from backup. No VMs or data are affected.
-
-## Requirements
-
-**Minimum: Proxmox VE 9.0+** (Debian Trixie). PVE 8.x is not supported.
-
-| Component | Version | Tested | Notes |
-|---|---|---|---|
-| **Proxmox VE** | 9.0+ | 9.1.7, 9.1.9 | Debian Trixie based |
-| **`qemu-server`** | 9.1.x | 9.1.6, 9.1.8 | Patched by this package |
-| **`pve-qemu-kvm`** | 10.x | 10.1.2 | QEMU with microvm support |
-| **`pve-ha-manager`** | 5.x | 5.1.3, 5.2.0 | HA relocate tested |
-| **Host kernel** | 6.14+ | 6.17.13-2-pve, 6.17.13-3-pve | PVE 9 default |
-
-### Tested nodes
-
-| Node | CPU | RAM | Notes |
-|---|---|---|---|
-| **z83ii** | Intel Atom x5-Z8350 @ 1.44 GHz | 2 GB | Low-end stability testing |
-| **borg** | Intel Core i7-12700 @ 4.9 GHz, 20 cores | 128 GB | Performance reference |
-
-### Dependencies
-
-- `skopeo` — OCI image pulling
-- `umoci` — OCI image unpacking
-- `qemu-utils` — disk conversion
-- KVM — `/dev/kvm` available
+Install the same tested package on every potential cluster destination before
+enabling the option. Live migration, HA and saved-state restore are not yet
+validated; do not use them with enabled VMs in this preview.

@@ -2,11 +2,11 @@
 # Pre-release CPU/allocation captures are deleted immediately after analysis.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-source "$ROOT/tools/pve-microvm-env.sh"
-pve_microvm_env tests
+source "$ROOT/tools/pve-virtio-mem-env.sh"
+pve_virtio_mem_env tests
 command -v valgrind >/dev/null || { echo 'Install valgrind before running profiled tests' >&2; exit 1; }
 RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
-REPORT="$PVE_MICROVM_RUN_DIR/profiles/$RUN_ID"
+REPORT="$PVE_VIRTIO_MEM_RUN_DIR/profiles/$RUN_ID"
 mkdir -p "$REPORT"
 SUMMARY="$ROOT/docs/profiling/latest.md"
 mkdir -p "$(dirname "$SUMMARY")"
@@ -26,11 +26,11 @@ trap 'rm -rf "$REPORT"' EXIT
 set +e
 valgrind --tool=callgrind --trace-children=yes \
     --callgrind-out-file="$REPORT/cpu.%p" --log-file="$REPORT/callgrind.%p.log" \
-    bash "$ROOT/tests/run-tests.sh" > "$REPORT/cpu-tests.log" 2>&1
+    bash "$ROOT/tests/virtio-mem/run.sh" > "$REPORT/cpu-tests.log" 2>&1
 cpu_rc=$?
 valgrind --tool=memcheck --trace-children=yes --xtree-memory=full \
     --xtree-memory-file="$REPORT/heap.%p" --log-file="$REPORT/memcheck.%p.log" \
-    bash "$ROOT/tests/run-tests.sh" > "$REPORT/tests.log" 2>&1
+    bash "$ROOT/tests/virtio-mem/run.sh" > "$REPORT/tests.log" 2>&1
 heap_rc=$?
 rc=$((cpu_rc || heap_rc))
 set -e

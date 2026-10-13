@@ -1,3 +1,11 @@
+pve-virtio-mem (0.1.0~alpha1-1) trixie; urgency=medium
+
+  * Fork pve-microvm packaging for opt-in Q35 virtio-mem integration.
+  * Translate native PVE balloon targets and normalize device statistics.
+  * Keep guarded patch rollback and upgrade triggers without boot services.
+
+ -- KirisameLonnet <KirisameLonnet@users.noreply.github.com>  Tue, 13 Oct 2026 12:00:00 +0000
+
 pve-microvm (0.3.29-1) trixie; urgency=high
 
   * Fix live full cloning of microVMs (#22): keep unversioned microvm on the

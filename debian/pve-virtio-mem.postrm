@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            deb-systemd-invoke reload-or-try-restart pvedaemon.service pveproxy.service
+            deb-systemd-invoke try-restart pvestatd.service
+        fi
+        ;;
+    purge) rm -rf /var/lib/pve-virtio-mem ;;
+esac
+#DEBHELPER#

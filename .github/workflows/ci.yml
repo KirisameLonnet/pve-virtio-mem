@@ -1,42 +1,29 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  build-deb:
-    name: Build Debian package (without kernel)
+  test-and-package:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-
-      - name: Configure project scratch root
-        run: |
-          echo "PROJECT_TMP_BASE=$RUNNER_TEMP" >> "$GITHUB_ENV"
-          echo "PROJECT_TMP_ROOT=$RUNNER_TEMP/pve-microvm" >> "$GITHUB_ENV"
-
-      - name: Install packaging tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq dpkg-dev debhelper fakeroot build-essential
-
-      - name: Run test suite
-        run: make test
-
-      - name: Upload concise test profiling conclusions
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: test-conclusions
-          path: docs/profiling/
-          retention-days: 14
-
-      - name: Build .deb (no kernel)
-        run: make deb
-
+      - run: echo "PROJECT_TMP_BASE=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq dpkg-dev debhelper fakeroot perl python3 patch
+      - run: make test
+      - run: make deb
       - name: Inspect package
-        run: |
-          find "$PROJECT_TMP_ROOT/build/deb" -name 'pve-microvm_*.deb' -exec dpkg-deb -c {} \;
+        run: find "$RUNNER_TEMP/pve-virtio-mem/build/deb" -name 'pve-virtio-mem_*.deb' -exec dpkg-deb -c {} \;
+      - uses: actions/upload-artifact@v5
+        with:
+          name: pve-virtio-mem-deb
+          path: ${{ runner.temp }}/pve-virtio-mem/build/deb/**/pve-virtio-mem_*.deb
+          if-no-files-found: error
+          retention-days: 7
+      - name: Dispose build scratch
+        if: always()
+        run: make clean CONFIRM_IDLE=yes

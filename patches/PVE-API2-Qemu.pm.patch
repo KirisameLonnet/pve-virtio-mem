@@ -1,0 +1,10 @@
+--- a/usr/share/perl5/PVE/API2/Qemu.pm
++++ b/usr/share/perl5/PVE/API2/Qemu.pm
+@@ -772,6 +772,7 @@
+ };
+ 
+ my $memoryoptions = {
++    'virtio-mem' => 1,
+     'memory' => 1,
+     'balloon' => 1,
+     'shares' => 1,

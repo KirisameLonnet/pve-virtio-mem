@@ -1,0 +1,24 @@
+--- a/usr/share/perl5/PVE/QemuServer/Monitor.pm
++++ b/usr/share/perl5/PVE/QemuServer/Monitor.pm
+@@ -2,6 +2,7 @@
+ 
+ use strict;
+ use warnings;
++use PVE::QemuServer::VirtioMem;
+ 
+ use PVE::SafeSyslog;
+ use PVE::QemuServer::Helpers;
+@@ -124,6 +125,13 @@
+ 
+ sub mon_cmd {
+     my ($vmid, $execute, %params) = @_;
++    if ($execute eq 'balloon') {
++        require PVE::QemuConfig;
++        my $conf = PVE::QemuConfig->load_config($vmid);
++        my $args;
++        ($execute, $args) = PVE::QemuServer::VirtioMem::translate_balloon($conf, $execute, \%params);
++        %params = %$args;
++    }
+ 
+     my $type = ($execute =~ /^guest\-+/) ? 'qga' : 'qmp';
+ 

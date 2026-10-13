@@ -1,0 +1,140 @@
+#!/usr/bin/python3
+"""Scoped adaptation of pve-microvm's preflight/backup/hash/revert lifecycle.
+
+GNU patch performs the source edits. Debian's package checksums establish
+provenance; a durable journal makes retries after interruption idempotent.
+This tool is invoked by dpkg, never by a boot service or polling loop.
+"""
+import argparse
+import base64
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic_write(path, data, mode=0o644):
+    fd, name = tempfile.mkstemp(prefix='.virtio-mem-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), mode)
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def package_original(root, relative, data):
+    checksums = root / 'var/lib/dpkg/info/qemu-server.md5sums'
+    wanted = {line.split(None, 1)[1]: line.split(None, 1)[0]
+              for line in checksums.read_text().splitlines()}
+    if wanted.get(relative) != hashlib.md5(data).hexdigest():
+        raise RuntimeError(f'{relative}: differs from the installed qemu-server package')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['apply', 'revert', 'status'])
+    parser.add_argument('--root', type=Path, default=Path('/'), help='offline staging root')
+    parser.add_argument('--patches', type=Path, default=Path('/usr/share/pve-virtio-mem/patches'))
+    args = parser.parse_args()
+    root = args.root.resolve()
+    state_dir = root / 'var/lib/pve-virtio-mem'
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (state_dir / 'lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        operate(args, root, state_dir)
+
+
+def operate(args, root, state_dir):
+    journal = state_dir / 'state.json'
+    state = json.loads(journal.read_text()) if journal.exists() else {}
+    if args.action == 'status':
+        if not state:
+            print('not applied')
+            return
+        for relative, record in state.items():
+            if digest((root / relative).read_bytes()) != record['patched']:
+                raise RuntimeError(f'{relative}: changed or interrupted; run apply')
+        print('applied; all file hashes verified')
+        return
+
+    if args.action == 'revert':
+        # Include snapshots and all nodes: leaving an unknown config option is unsafe.
+        for config in (root / 'etc/pve/nodes').glob('*/qemu-server/*.conf'):
+            if re.search(r'^virtio-mem:\s*[1-9][0-9]*\s*$', config.read_text(), re.M):
+                raise RuntimeError('Remove virtio-mem from guest configs and snapshots before uninstall')
+        restores = {}
+        for relative, record in state.items():
+            original = base64.b64decode(record['original'], validate=True)
+            if digest(original) != record['original_sha256']:
+                raise RuntimeError(f'{relative}: damaged backup')
+            current = (root / relative).read_bytes()
+            if digest(current) not in (record['patched'], record['original_sha256']):
+                raise RuntimeError(f'{relative}: changed; refusing stale restore')
+            restores[relative] = (original, record['mode'])
+        for relative, (data, mode) in restores.items():
+            atomic_write(root / relative, data, mode)
+        journal.unlink(missing_ok=True)
+        print('reverted')
+        return
+
+    plan, updated = {}, {}
+    patches = sorted(args.patches.glob('*.patch'))
+    if not patches:
+        raise RuntimeError('No patches found')
+    for patch in patches:
+        headers = re.findall(r'^\+\+\+ b/(\S+)$', patch.read_text(), re.M)
+        if len(headers) != 1:
+            raise RuntimeError(f'{patch.name}: expected one target')
+        relative = headers[0]
+        if not relative.startswith('usr/share/perl5/PVE/') or '..' in Path(relative).parts:
+            raise RuntimeError('Unexpected patch target')
+        path = root / relative
+        current = path.read_bytes()
+        record = state.get(relative)
+        original = current
+        if record and digest(current) in (record['patched'], record['original_sha256']):
+            original = base64.b64decode(record['original'], validate=True)
+            if digest(original) != record['original_sha256']:
+                raise RuntimeError(f'{relative}: damaged backup')
+        # Also rejects admin modifications after a package update, before any writes.
+        package_original(root, relative, original)
+        with tempfile.TemporaryDirectory(prefix='preflight-', dir=state_dir) as scratch:
+            staged = Path(scratch) / 'source'
+            staged.write_bytes(original)
+            result = subprocess.run(['patch', '--batch', '--forward', '--fuzz=0',
+                                     str(staged), str(patch.resolve())],
+                                    capture_output=True, text=True)
+            if result.returncode:
+                raise RuntimeError(f'{relative}: unsupported source layout\n{result.stdout}{result.stderr}')
+            patched = staged.read_bytes()
+        mode = path.stat().st_mode & 0o777
+        updated[relative] = dict(original=base64.b64encode(original).decode(),
+                                 original_sha256=digest(original), patched=digest(patched), mode=mode)
+        plan[relative] = patched, mode
+    if state.keys() - updated.keys():
+        raise RuntimeError('Patch set removed a managed file; revert before changing patch sets')
+    # Commit recovery information before edits, so interrupted dpkg configuration can retry.
+    atomic_write(journal, json.dumps(updated, sort_keys=True).encode(), 0o600)
+    for relative, (data, mode) in plan.items():
+        atomic_write(root / relative, data, mode)
+    print('applied; originals and patched hashes recorded')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as error:
+        raise SystemExit(f'pve-virtio-mem: {error}')

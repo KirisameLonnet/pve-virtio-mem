@@ -1,91 +1,61 @@
-# Configuration Reference
+# Configuration
 
-## Supported options
+The new opt-in property is `virtio-mem`, measured in MiB. The existing memory,
+balloon and shares fields keep their PVE meanings:
 
-| Option | Notes |
-|---|---|
-| `machine` | Must be `microvm` |
-| `memory` | Total allocation (MiB); max when virtio-mem is active |
-| `balloon` | Minimum memory (MiB) for auto-ballooning; PVE controller inflates/deflates between this and `memory` |
-| `virtio-mem` | Hot-pluggable memory pool (MiB); subtracted from `memory` as dynamically-addable via virtio-mem |
-| `cores` | vCPUs per socket |
-| `sockets` | CPU sockets |
-| `cpu` | CPU model (default: `host`) |
-| `name` | Guest name |
-| `args` | **Required** — must include `-kernel` and `-initrd` |
-| `kvm` | Hardware virtualization (default: on) |
-| `agent` | Guest agent (recommended) |
-| `serial0` | Set to `socket` for `qm terminal` |
-| `vga` | Set to `serial0` for PVE web console |
-| `net0`–`net5` | virtio only; bridge, MAC, VLAN |
-| `scsi0`–`scsi30` | Block devices (virtio-blk-pci on PCIe) |
-| `affinity` | CPU pinning |
-| `onboot` | Start on host boot |
-| `tags` | Metadata (use `microvm` for ⚡ icon) |
-| `protection` | Prevent accidental removal |
-| `ciuser` | Cloud-init user |
-| `cipassword` | Cloud-init password |
-| `ipconfig0` | Cloud-init network (e.g. `ip=dhcp`) |
-| `sshkeys` | Cloud-init SSH public keys |
+| Property | Meaning |
+| --- | --- |
+| `memory` | Maximum RAM, including the removable pool |
+| `virtio-mem` | Removable pool; fixed boot RAM is memory minus this value |
+| `balloon` | Minimum target; must be between fixed boot RAM and maximum |
+| `shares` | Native PVE scheduler weight; zero disables automatic adjustments |
 
-## Unsupported options
+Synthetic example for a **stopped disposable guest**:
 
-| Option | Reason |
-|---|---|
-| `bios` | No BIOS/UEFI — direct kernel boot |
-| `efidisk0` | No UEFI |
-| `tablet` | No USB bus |
-| `audio0` | No audio hardware |
-| `usb0`–`usb9` | No USB bus |
-| `hostpci0`–`hostpci3` | No PCI passthrough (PCIe is used internally) |
-| `tpmstate0` | No TPM |
-| `rng0` | Use virtio-rng instead |
-| `parallel0`–`parallel2` | No ISA parallel port |
-
-`vmgenid` and `smbios1` are auto-set by `qm create` but silently ignored.
-
-These options are **automatically hidden** in the PVE web UI when
-`machine: microvm` is selected.
-
-## Example config
-
-`/etc/pve/qemu-server/900.conf`:
-
-```ini
-agent: 1
-args: -kernel /usr/share/pve-microvm/vmlinuz -initrd /usr/share/pve-microvm/initrd -append "console=ttyS0 root=/dev/vda rw quiet"
-ciuser: root
-cores: 2
-ipconfig0: ip=dhcp
-machine: microvm
-memory: 512
-name: my-sandbox
-net0: virtio=BC:24:11:00:00:01,bridge=vmbr0
-scsi0: local-lvm:vm-900-disk-0,size=2G
-scsi1: local-lvm:vm-900-cloudinit,media=cdrom
-serial0: socket
-tags: microvm
-vga: serial0
+```sh
+qm set <vmid> --machine q35 --ostype l26 --numa 1 --sockets 1
+qm set <vmid> --memory 16384 --virtio-mem 12288 --balloon 4096 --shares 1000
 ```
 
-`scsi0` is always emitted first and is `/dev/vda`, matching the kernel's
-`root=/dev/vda`. If present, the cloud-init disk at `scsi1` is `/dev/vdb` and
-does not change the root argument. File-backed linked clones retain their qcow2
-format through PVE storage metadata; block-backed LVM/ZFS volumes use raw.
+Boot RAM must be at least 1024 MiB. Memory values must be aligned to 2 MiB.
+Keep the virtio-balloon device enabled for statistics; resizing commands are
+translated to virtio-mem, so the balloon is not inflated at the same time.
+The preview supports one virtual socket, one NUMA node and ordinary anonymous
+RAM. It rejects DIMM memory hotplug, explicit numaN topology, hugepages,
+virtio-fs and confidential-VM settings. Existing non-memory hotplug options
+may remain enabled. Topology/pool changes require a full VM stop/start.
 
-## Automatic features
+## Linux guest
 
-When `machine: microvm` is detected, `MicroVM.pm` automatically:
+Use a recent Linux kernel with CONFIG_VIRTIO_MEM, MEMORY_HOTPLUG and
+MEMORY_HOTREMOVE (a current LTS kernel is recommended). Load `virtio_mem`
+through the distribution's native module configuration if needed. Configure
+memory onlining through the distribution's bootloader, for example:
 
-- Uses PCIe with `pcie=on` and non-transitional virtio devices
-- Adds `virtio-balloon-pci-non-transitional` with `free-page-reporting=on` (guest returns freed pages to host automatically) and `deflate-on-oom=on` (reclaim balloon pages under OOM pressure)
-- Supports active auto-ballooning via PVE `balloon` config — set `balloon: 512` with `memory: 2048` to allow the host to reclaim between 512 MB and 2048 MB
-- Adds `virtio-mem-pci` for fine-grained live memory hot-add/remove when `virtio-mem` is set (e.g., `qm set 100 -virtio-mem 1024` with `memory: 2048` gives 1 GB base + 1 GB hotplug pool). Grow/shrink live via QMP: `qom-set /objects/vmem0 requested-size <bytes>`. No PVE web UI affordance yet.
+```text
+memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=301
+```
 
-**Caveat:** combining active ballooning (`balloon` target) and `virtio-mem` simultaneously can produce unpredictable behaviour in QEMU -- the balloon may fight the virtio-mem controller for the same pages. Use one or the other, not both.
-- Adds `vhost-vsock-pci-non-transitional` with CID = VMID + 1000 (if `/dev/vhost-vsock` exists)
-- Adds virtiofs device (if `pve-microvm-share` started a virtiofsd for this VM)
-- Adds 9p share devices (if `pve-microvm-9p` configured shares for this VM)
-- Injects `-initrd` automatically when using the shipped kernel
-- Strips `vmgenid` and `smbios1` from config
-- Sets `serial0: socket` if not already set
+Consult the [virtio-mem Linux guide](https://virtio-mem.gitlab.io/user-guide/user-guide-linux.html)
+before selecting a policy. A large removable pool with a small boot base does
+not imply all of that pool can always be removed. Unmovable or pinned guest
+pages can delay or prevent reaching a requested minimum. Do not force all
+added RAM into ZONE_MOVABLE without considering the workload's kernel memory.
+
+## Host and devices
+
+The initial implementation uses `memory-backend-ram,reserve=off,prealloc=off`,
+2 MiB blocks and `dynamic-memslots=off`. Static KVM slots avoid requiring a
+live vhost module reload, but lose the metadata savings and extra isolation
+of dynamic slots. This is an explicit preview limitation. It does not disable
+the QEMU/VFIO discard coordination mechanism.
+
+The [QEMU guide](https://virtio-mem.gitlab.io/user-guide/user-guide-qemu.html)
+describes VFIO DMA-map limits and dynamic slots. Large pools may need a larger
+block size or additional VFIO mapping capacity; this preview exposes neither
+as a config option. Do not assume arbitrary pool sizes or every passthrough
+device are supported.
+
+PVE scheduling remains gradual and driven by host pressure, not immediate
+application demand. A minimum is not an idle-memory target. Configure a
+minimum sufficient for the guest workload and measure actual reclamation.

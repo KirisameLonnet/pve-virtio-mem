@@ -1,69 +1,19 @@
 #!/usr/bin/make -f
 %:
 	dh $@
-
-override_dh_auto_install:
-	# Install patches for qemu-server
-	install -d $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/patches
-	install -m 644 debian/patches/*.patch $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/patches/
-
-	# Install the patch application/removal scripts, MicroVM module, and init
-	install -d $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm
-	install -m 755 tools/pve-microvm-patch $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-	install -d debian/pve-microvm/usr/share/pve-microvm/lib
-	install -m 644 tools/lib/project-tmp.sh debian/pve-microvm/usr/share/pve-microvm/lib/
-	install -m 644 tools/pve-microvm-env.sh debian/pve-microvm/usr/share/pve-microvm/
-	install -m 644 tools/MicroVM.pm $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-	install -d $(CURDIR)/debian/pve-microvm/usr/lib/systemd/system
-	install -m 644 tools/pve-microvm-early.service $(CURDIR)/debian/pve-microvm/usr/lib/systemd/system/
-	install -m 755 tools/microvm-init $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-	install -m 755 tools/microvm-setup $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-
-	# Install OCI import and template tools
-	install -d $(CURDIR)/debian/pve-microvm/usr/bin
-	install -m 755 tools/pve-oci-import $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-template $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-share $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-9p $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-ssh-agent $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-run $(CURDIR)/debian/pve-microvm/usr/bin/
-	install -m 755 tools/pve-microvm-bench $(CURDIR)/debian/pve-microvm/usr/bin/
-
-	# Install microvm defaults and image config
-	install -d $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm
-	install -m 644 doc/microvm-defaults.conf $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-	install -m 644 doc/microvm-images.conf $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/
-
-	# Install microvm kernel (if present — built by CI or build-kernel.sh)
-	if [ -f $(PVE_MICROVM_KERNEL_DIR)/vmlinuz-microvm ]; then \
-		install -m 644 $(PVE_MICROVM_KERNEL_DIR)/vmlinuz-microvm $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/vmlinuz; \
-	fi
-	if [ -f $(PVE_MICROVM_KERNEL_DIR)/initrd-microvm ]; then \
-		install -m 644 $(PVE_MICROVM_KERNEL_DIR)/initrd-microvm $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/initrd; \
-	fi
-
-	# Install kernel build tooling
-	install -d $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/kernel
-	install -m 755 kernel/build-kernel.sh $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/kernel/
-	install -m 644 kernel/base-x86_64-6.1.config $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/kernel/
-	install -m 644 tests/landlock-smoke.c debian/pve-microvm/usr/share/pve-microvm/kernel/
-	install -m 755 kernel/check-landlock.sh debian/pve-microvm/usr/share/pve-microvm/kernel/
-	install -m 755 kernel/check-erofs.sh debian/pve-microvm/usr/share/pve-microvm/kernel/
-	if [ -f "$(PVE_MICROVM_KERNEL_DIR)/kernel-config" ]; then install -m 644 "$(PVE_MICROVM_KERNEL_DIR)/kernel-config" debian/pve-microvm/usr/share/pve-microvm/kernel/build.config; fi
-	install -m 644 kernel/pve-microvm-overlay.config $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/kernel/
-
-	# Install UI customization files
-	install -d $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/ui
-	install -m 644 ui/pve-microvm.css $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/ui/
-	install -m 644 ui/pve-microvm.js $(CURDIR)/debian/pve-microvm/usr/share/pve-microvm/ui/
-
 override_dh_auto_build:
-	# Nothing to build
-
+	true
 override_dh_auto_clean:
-	# Do NOT run make clean/distclean — preserve $(PVE_MICROVM_KERNEL_DIR)/vmlinuz-microvm
-	# downloaded by CI before the build step
-
-
+	true
 override_dh_auto_test:
-	# No tests during build
+	make test
+override_dh_auto_install:
+	install -d debian/pve-virtio-mem/usr/share/pve-virtio-mem/patches
+	install -m 644 patches/*.patch debian/pve-virtio-mem/usr/share/pve-virtio-mem/patches/
+	install -d debian/pve-virtio-mem/usr/share/perl5/PVE/QemuServer
+	install -m 644 tools/VirtioMem.pm debian/pve-virtio-mem/usr/share/perl5/PVE/QemuServer/
+	install -d debian/pve-virtio-mem/usr/sbin
+	install -m 755 tools/pve-virtio-mem-patch debian/pve-virtio-mem/usr/sbin/
+
+override_dh_installdocs:
+	dh_installdocs README.md LICENSE LICENSES/AGPL-3.0-or-later.txt

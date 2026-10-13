@@ -1,27 +1,17 @@
-Source: pve-microvm
+Source: pve-virtio-mem
 Section: admin
 Priority: optional
-Maintainer: Rui Carmo <rui.carmo@gmail.com>
-Build-Depends: debhelper-compat (= 13)
+Maintainer: KirisameLonnet <KirisameLonnet@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), perl, python3, patch
 Standards-Version: 4.6.2
-Homepage: https://github.com/rcarmo/pve-microvm
+Homepage: https://github.com/KirisameLonnet/pve-virtio-mem
 
-Package: pve-microvm
+Package: pve-virtio-mem
 Architecture: all
-Depends: ${misc:Depends},
-         pve-qemu-kvm (>= 10.0),
-         qemu-server (>= 9.0),
-         skopeo,
-         umoci,
-         qemu-utils
-Recommends: pve-manager (>= 9.0)
-Description: QEMU microvm machine type support for Proxmox VE
- Adds the QEMU microvm machine type as a managed guest type in Proxmox VE 9.x.
- Provides patches to qemu-server for microvm-aware command generation,
- a helper tool to convert OCI container images into bootable microvm disk
- images, and a minimal microvm kernel configuration.
- .
- Tested against Proxmox VE 9.0 (Debian Trixie, QEMU 10.2, qemu-server 9.1.x).
- .
- microvm guests boot in under 200ms, use virtio-mmio devices instead of
- PCI, and provide full KVM hardware isolation with minimal attack surface.
+Depends: ${misc:Depends}, perl, python3, patch,
+         pve-qemu-kvm (>= 10.0), qemu-server (>= 9.1.17), pve-manager (>= 9.0)
+Conflicts: pve-microvm
+Description: Experimental virtio-mem integration for Proxmox VE Q35 guests
+ Reuses Proxmox VE memory scheduling and QEMU virtio-mem to manage removable
+ guest RAM. Includes guarded source patches and Debian upgrade triggers.
+ No custom boot service, scheduler daemon, kernel or GPU driver is installed.

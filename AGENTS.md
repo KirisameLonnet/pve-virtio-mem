@@ -1,3 +1,20 @@
+# pve-virtio-mem fork instructions
+
+This fork is `pve-virtio-mem`. Active implementation: `tools/VirtioMem.pm`,
+`patches/`, `tools/pve-virtio-mem-patch`, `tests/virtio-mem/`, and `debian/`.
+Use `make test`, `make deb`, and pre-release `make test-profile`.
+Project scratch is `pve-virtio-mem`, using the inherited generic resolver.
+Retain upstream attribution/history. Legacy microvm tools are not packaged.
+
+The owner explicitly requires reuse of native PVE scheduling and QEMU memory
+management, with no custom scheduler, cron job or early-boot patch service.
+Persistent guarded patches and dpkg file triggers replace the upstream early
+service. These fork instructions supersede conflicting microvm-specific text
+below. Privacy, reversible changes, profiling disposal and Git rules still apply.
+A build/test pass is not evidence of successful live VFIO memory reclamation.
+
+---
+
 <!-- RUI-PROFILE-LIFECYCLE-20261005 -->
 ## Current profiling and cleanup rule — supersedes older text below
 

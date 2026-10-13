@@ -1,153 +1,53 @@
-# pve-microvm
+# pve-virtio-mem
 
-![pve-microvm](docs/icon-256.png)
+为 **Proxmox VE 的普通 Q35 Linux VM** 接入 QEMU `virtio-mem`，用于探索
+PCI/GPU 直通场景下的宿主内存回收。项目派生自
+[rcarmo/pve-microvm](https://github.com/rcarmo/pve-microvm)，保留上游历史和署名。
 
-<p align="center">
-  <img src="docs/pve-microvm-demo.gif" alt="pve-microvm in the Proxmox web UI" width="720">
-</p>
+**状态：开发预览（alpha），尚未完成真实 GPU 直通的内存回收验收。**
+软件包副本测试和 QEMU 命令测试通过，不代表生产兼容性已验证。
 
-A Debian package that adds QEMU `microvm` machine type support to Proxmox VE.
-Runs OCI container images, [Firecracker rootfs images](docs/firecracker.md), unikernels, and alternative OS as lightweight hardware-isolated VMs.
+## 如何工作
 
-> **⚠️ Highly experimental.** This project patches `qemu-server` internals and
-> has not been tested in production. Use at your own risk. The patches are
-> fully reversible — uninstalling the package restores the original files.
+- 继续使用 PVE 的 `pvestatd` / `PVE::AutoBalloon` 调度算法、shares 和内存上下限。
+- 为显式启用的 VM 把 `balloon` 目标转换为 `virtio-mem` 的 `requested-size`。
+- 用 QMP 实际已接入的内存容量修正分配统计，保留 balloon 驱动提供的客户机统计。
+- 保留普通 Q35、UEFI 和原有设备构建流程；无需换成 microvm 机型。
+- 使用 Debian 软件包、升级文件触发器及可验证回滚。
+  **不安装自定义开机服务、定时任务或内存调度守护进程。**
 
-📝 [Blog post with some background](https://taoofmac.com/space/blog/2026/06/18/1845) · ❓ [FAQ](docs/faq.md)
+PVE 原生调度主要响应宿主内存压力。最低值是下限，空闲时不保证立即降至最低；
+有空余宿主 RAM 时，原算法可能增加分配。内存热拔除也可能受客户机不可移动页阻碍。
 
----
+## 开发与验证
 
-## Why
-
-We needed something between LXC containers and full QEMU VMs for running
-coding agents and other semi-trusted workloads.
-
-| | LXC | microvm | Standard VM |
-|---|---|---|---|
-| Isolation | Namespace (shared kernel) | **KVM (own kernel)** | KVM (own kernel) |
-| Boot time | ~50 ms | **< 300 ms** | 2–10 s |
-| Overhead | Minimal | **Minimal** | Moderate |
-| Attack surface | Broad (host kernel) | **Minimal (virtio-pcie)** | Broad (emulated PC) |
-| Untrusted code | ⚠️ risky | **✅ safe** | ✅ safe |
-
-**Hardware-isolated VMs with container-like speed**, managed through the same
-Proxmox tools you already use. No new runtime — QEMU's `microvm` machine type
-is already on every PVE node.
-
----
-
-## Highlights
-
-- **50 features shipped** — templates, cloning, networking, HA, web UI, backups
-- **21 guest OS** — 13 Linux distros + SmolBSD, OpenWrt, OPNsense, 9Front, OSv, gokrazy, Firecracker
-- **31 ms boot** (SmolBSD) to **~2 s** (Alpine) to **~8 s** (Debian)
-- **Create µVM button** in PVE web UI with OCI image picker
-- **All storage backends** — LVM, LVM-thin, ZFS, NFS, CIFS, Ceph
-- **HA + migration** — offline migration in 2 seconds, ha-manager relocate
-- **Tested on 4 nodes** — from Atom x5-Z8350 (2 GB) to i7-12700 (128 GB)
-
----
-
-## Quick start
-
-```bash
-# Install (always fetches the latest release)
-curl -sLO $(curl -s https://api.github.com/repos/rcarmo/pve-microvm/releases/latest | grep browser_download_url | grep '.deb' | cut -d'"' -f4)
-dpkg -i pve-microvm_*.deb
-
-# Create a template from any OCI image
-pve-microvm-template --image debian:trixie-slim
-
-# Clone and boot
-qm clone 9000 901 --name my-sandbox --full
-qm start 901
-qm terminal 901
+```sh
+make test
+make deb
+# macOS 的 /tmp 是符号链接，使用解析后的临时目录：
+PROJECT_TMP_BASE=/private/tmp make test
 ```
 
-Or use the **Create µVM** button in the PVE web UI.
+Debian 构建需要 `debhelper`、`dpkg-dev`、Perl、Python 3 和 GNU patch。
+生成的包位于项目独立临时目录的 `build/deb/` 下；GitHub CI 提供构建产物。
 
----
+| 检查 | 已验证范围 |
+| --- | --- |
+| 适配器 | 33 项检查：上下限、对齐、普通 VM 不变、异步统计和请求转换 |
+| 安装生命周期 | 7 项测试：幂等、回滚、升级、中断恢复、管理员改动及备份损坏保护 |
+| 真实包副本 | qemu-server 9.1.17、9.2.11：补丁、模块加载、回滚校验 |
+| QEMU | 11.0：暂停的 TCG 实例接受设备及 QMP 请求；未启动客户机 |
+| GPU 直通 RAM 回收 | **待测**：客户机驱动、实际回收量、GPU 工作负载及重启 |
 
-## Supported guests
+## 文档
 
-| Category | Images |
-|---|---|
-| **Linux (apt)** | Debian, Ubuntu |
-| **Linux (apk)** | Alpine |
-| **Linux (dnf/tdnf)** | Fedora, Rocky, Alma, Amazon, Oracle, UBI, Photon, Azure Linux |
-| **Router/Firewall** | OpenWrt, OPNsense |
-| **BSD** | SmolBSD (NetBSD, 31ms boot) |
-| **Plan 9** | 9Front |
-| **Unikernel** | OSv, gokrazy |
-| **Compatible** | Any Firecracker rootfs (ext4 import) |
+- [安装、升级与卸载](docs/installation.md)
+- [参数与客户机配置](docs/configuration.md)
+- [架构及复用边界](docs/architecture.md)
+- [已知限制与验收](docs/known-issues.md)
 
----
+原 microvm 内核、OCI 工具和 UI 等源文件保留用于历史及复用参考，**不进入此项目的安装包**。
+[原上游 README](docs/upstream-readme.md) 与未改写的 microvm 文档仅描述上游产品。
 
-## What's included
-
-| Component | Description |
-|---|---|
-| **`pve-microvm-template`** | Create PVE templates from OCI images or specialist OS |
-| **`pve-oci-import`** | Convert any OCI image to a bootable microvm disk |
-| **`pve-microvm-share`** | Share host directories via virtiofs |
-| **`pve-microvm-9p`** | Share host directories via 9p (no daemon) |
-| **`pve-microvm-ssh-agent`** | Forward SSH agent via vsock |
-| **`pve-microvm-run`** | Ephemeral microvms (run and destroy) |
-| **`pve-microvm-bench`** | Boot time and overhead benchmarking |
-| **Web UI** | Create µVM dialog, ⚡ icon, xterm.js console, panel hiding |
-| **Kernel** | Pre-built 6.12.22 with PCIe virtio + vsock + virtiofs |
-
----
-
-## Tested on
-
-| | z83ii (worst-case) | borg (reference) |
-|---|---|---|
-| **CPU** | Atom x5-Z8350 @ 1.44 GHz | i7-12700 @ 4.9 GHz |
-| **RAM** | 2 GB | 128 GB |
-| **PVE** | 9.1.9 (qemu-server 9.1.8) | 9.1.7 (qemu-server 9.1.6) |
-| **QEMU** | 10.1.2 | 10.1.2 |
-
-Full cluster: 4 nodes — see [Cluster Hardware](docs/cluster-hardware.md).
-
----
-
-## Documentation
-
-- **[Installation](docs/installation.md)** — install, verify, uninstall
-- **[Quick Start](docs/usage.md)** — templates, cloning, basic usage
-- **[Guest OS](docs/guests.md)** — all supported distributions and specialist OS
-- **[Networking & Storage](docs/networking.md)** — virtiofs, 9p, vsock, SSH agent
-- **[Web UI](docs/webui.md)** — Create µVM dialog, console, icons, panel hiding
-- **[Configuration](docs/configuration.md)** — supported/unsupported options
-- **[Architecture](docs/architecture.md)** — how it works, QEMU command line
-- **[Firecracker Compatibility](docs/firecracker.md)** — importing rootfs images
-- **[High Availability](docs/ha.md)** — migration, HA relocate
-- **[Test Matrix](docs/test-matrix.md)** — distros, features, hardware
-- **[Cluster Hardware](docs/cluster-hardware.md)** — all 4 nodes
-- **[Known Issues](docs/known-issues.md)** — workarounds and fixes
-- **[Limitations](docs/limitations.md)** — what doesn't work (yet)
-- **[Troubleshooting](docs/troubleshooting.md)** — common problems
-- **[FAQ](docs/faq.md)** — frequently asked questions
-- **[Development](docs/development.md)** — repo structure, building
-- **[Changelog](docs/changelog.md)** — full feature list and release history
-
----
-
-## Roadmap
-
-| Feature | Priority |
-|---|---|
-| Network off by default | Medium |
-| Egress allow-list (nftables) | Medium |
-| ~~Memory management (free-page-reporting, deflate-on-oom, auto-ballooning, virtio-mem)~~ | ~~Done v0.3.12~~ |
-| Declarative VM config (TOML) | Low |
-| GPU passthrough | Low |
-| AArch64 guest support | Low |
-| Upstream RFC for pve-devel | Low |
-
----
-
-## License
-
-[Apache-2.0](LICENSE)
+Apache-2.0；原上游署名保留。PVE 源码补丁的上下文来自 Proxmox
+[qemu-server](https://git.proxmox.com/?p=qemu-server.git)，该部分遵循其原有许可。

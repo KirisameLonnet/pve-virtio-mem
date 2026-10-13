@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    configure|triggered)
+        /usr/sbin/pve-virtio-mem-patch apply
+        # Persistent file edits survive boots; only existing PVE services are refreshed.
+        if [ -d /run/systemd/system ]; then
+            deb-systemd-invoke reload-or-try-restart pvedaemon.service pveproxy.service
+            deb-systemd-invoke try-restart pvestatd.service
+        fi
+        ;;
+esac
+#DEBHELPER#

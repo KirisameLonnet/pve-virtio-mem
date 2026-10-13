@@ -1,0 +1,47 @@
+--- a/usr/share/perl5/PVE/QemuServer.pm
++++ b/usr/share/perl5/PVE/QemuServer.pm
+@@ -2,6 +2,7 @@
+ 
+ use strict;
+ use warnings;
++use PVE::QemuServer::VirtioMem;
+ 
+ use Cwd 'abs_path';
+ use Digest::SHA;
+@@ -313,6 +314,13 @@
+         format => 'pve-qemu-tdx-fmt',
+         type => 'string',
+     },
++    'virtio-mem' => {
++        optional => 1,
++        type => 'integer',
++        minimum => 0,
++        default => 0,
++        description => 'Removable virtio-mem pool in MiB, included in memory. Requires cold start.',
++    },
+     balloon => {
+         optional => 1,
+         type => 'integer',
+@@ -2636,10 +2644,12 @@
+ 
+     my $qmpclient = PVE::QMPClient->new();
+ 
++    my $virtio_mem_stats = {};
+     my $ballooncb = sub {
+         my ($vmid, $resp) = @_;
+ 
+         my $info = $resp->{'return'};
++        return unless PVE::QemuServer::VirtioMem::normalize_stats($info, $virtio_mem_stats->{$vmid});
+         return if !$info->{max_mem};
+ 
+         my $d = $res->{$vmid};
+@@ -2719,6 +2729,9 @@
+         $qmpclient->queue_cmd($qmp_peer, $blockstatscb, 'query-blockstats');
+         $qmpclient->queue_cmd($qmp_peer, $machinecb, 'query-machines');
+         $qmpclient->queue_cmd($qmp_peer, $versioncb, 'query-version');
++        PVE::QemuServer::VirtioMem::queue_stats(
++            $qmpclient, $qmp_peer, PVE::QemuConfig->load_config($vmid), $virtio_mem_stats,
++        );
+         # this fails if balloon driver is not loaded, so this must be
+         # the last command (following command are aborted if this fails).
+         $qmpclient->queue_cmd($qmp_peer, $ballooncb, 'query-balloon');
