@@ -1,7 +1,9 @@
 # Installation and package lifecycle
 
-This is an experimental development package. Start with a disposable Q35 Linux
-VM. GPU/VFIO reclamation and production lifecycle operations remain unvalidated.
+This is an experimental development package. Basic live GPU/VFIO RAM
+reclamation, native scheduling and CUDA/SHMEM operation have passed acceptance
+checks in a Linux Q35 guest. Start another deployment with a disposable guest;
+see the documented scope before using broader lifecycle operations.
 
 Build on Debian with `make deb`, then install the resulting local package using
 `apt install ./pve-virtio-mem_*.deb`. CI artifacts are also available from the

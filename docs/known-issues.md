@@ -1,10 +1,21 @@
 # Preview limitations and acceptance criteria
 
-The current validation covers the Perl adapter, package lifecycle, actual
-qemu-server package copies and a paused QEMU TCG smoke test. It does not yet
-establish end-to-end VFIO memory reclamation or production safety.
+Live validation has now passed in an isolated Linux Q35 guest with GPU/VFIO
+passthrough. A complete RAM grow/shrink cycle changed actual QMP allocation,
+guest MemTotal and host cgroup consumption consistently. The removable pool
+was fully unplugged and the corresponding host RAM was released.
 
-Before using an enabled VM for real workloads, verify all of the following:
+PVE allocation and guest-use statistics were correct. Re-enabling native shares
+resulted in pvestatd automatically growing the virtio-mem device. Local CUDA
+vector addition and concurrent existing SHMEM client vector addition passed
+after shrinking. SSH, guest agent, graphical login, persistent data mounting
+and the worker service remained functional after a cold start.
+
+These are basic live acceptance results, alongside adapter, package-lifecycle,
+real-package-copy and paused QEMU checks. They do not establish compatibility
+with every application, active pinned-memory workload or lifecycle operation.
+
+When validating another deployment or workload, check the following:
 
 - A full stop/start boots with the original disks, firmware and networking.
 - Linux detects virtio_mem and onlines new RAM with the intended policy.
@@ -34,3 +45,10 @@ plug memory; this test makes no reclamation or GPU performance claim.
 The full PVE Q35 command builder also accepted a synthetic opt-in configuration,
 including the fixed RAM backend, virtio-mem device and balloon statistics device.
 No real guest was started during that check.
+
+## PCI device placement
+
+The memory backend is constructed in the existing PVE memory builder, but the
+virtio-mem PCI device is appended after all PVE devices and custom arguments.
+QEMU can then allocate a free PCI address without taking an explicitly reserved
+VGA or IVSHMEM slot. A paused QEMU regression covers both reservations.

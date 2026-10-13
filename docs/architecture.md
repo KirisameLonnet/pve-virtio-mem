@@ -20,7 +20,8 @@ Four narrow source patches connect these existing components:
 4. `API2/Qemu.pm` classifies the new option as VM.Config.Memory.
 
 The adapter builds one fixed boot backend and one sparse virtio-mem backend
-on NUMA node zero. It subtracts fixed boot RAM from each native total-RAM
+on NUMA node zero. The PCI device is appended after PVE devices and custom args
+so QEMU's automatic address allocator respects their existing reservations. It subtracts fixed boot RAM from each native total-RAM
 target. It does not modify pvestatd or PVE::AutoBalloon and has no event loop.
 
 The package lifecycle tool runs GNU patch with zero fuzz and uses Python's
