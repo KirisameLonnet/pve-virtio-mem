@@ -1,62 +1,85 @@
 # pve-virtio-mem
 
-为 **Proxmox VE 的普通 Q35 Linux VM** 接入 QEMU `virtio-mem`，实现
-PCI/GPU 直通场景下的宿主内存回收。项目派生自
-[rcarmo/pve-microvm](https://github.com/rcarmo/pve-microvm)，保留上游历史和署名。
+为 Proxmox VE 的 Q35 Linux 虚拟机添加 virtio-mem 支持的 Debian 软件包。
+让带 GPU／PCI 直通的虚拟机在缩容时释放宿主 RAM。
 
-**状态：开发预览（alpha），已通过 GPU/VFIO 直通 Linux VM 的实机基础验收。**
+普通 balloon 无法解除 VFIO 固定的 RAM 映射。本项目将 PVE 的内存调整请求
+转换为 virtio-mem 热插拔，调度仍由 PVE 原生的 `pvestatd` 和 `shares` 管理。
+宿主内存充裕时可以扩容，内存紧张时缩容；最低内存是缩容下限。
 
-实测完整的内存增减周期中，宿主 cgroup 占用随实际接入内存变化，拔除内存后
-宿主 RAM 确实释放；PVE 正确显示内存上限、当前分配量和客户机用量。
-本地 CUDA、TensorFusion SHMEM 客户端运算及 PVE 原生自动调度均已验证。
+## 安装
 
-## 如何工作
+要求 PVE 9、QEMU 10 或以上、qemu-server 9.1.17 或以上。
+虚拟机使用 Q35、单 socket、单 NUMA 节点；客户机需要 Linux 5.19 或以上及 `virtio_mem` 驱动。
+不能与 `pve-microvm` 同时安装。
 
-- 继续使用 PVE 的 `pvestatd` / `PVE::AutoBalloon` 调度算法、shares 和内存上下限。
-- 为显式启用的 VM 把 `balloon` 目标转换为 `virtio-mem` 的 `requested-size`。
-- 用 QMP 实际已接入的内存容量修正分配统计，保留 balloon 驱动提供的客户机统计。
-- 保留普通 Q35、UEFI 和原有设备构建流程；无需换成 microvm 机型。
-- 使用 Debian 软件包、升级文件触发器及可验证回滚。
-  **不安装自定义开机服务、定时任务或内存调度守护进程。**
+从 [GitHub Actions](https://github.com/KirisameLonnet/pve-virtio-mem/actions/workflows/ci.yml)
+下载并解压构建产物，在 PVE 节点安装其中的 `.deb`：
 
-PVE 原生调度主要响应宿主内存压力。最低值是下限，空闲时不保证立即降至最低；
-有空余宿主 RAM 时，原算法可能增加分配。内存热拔除也可能受客户机不可移动页阻碍。
+```sh
+apt install ./pve-virtio-mem_*.deb
+```
 
-## 开发与验证
+软件包会校验、备份并修改 PVE 的 Perl 模块。升级补丁由 dpkg 触发器维护。
+卸载和版本兼容说明见 [安装文档](docs/installation.md)。
+
+## 配置
+
+内存容量的单位为 MiB。
+
+| 参数 | 含义 |
+| --- | --- |
+| `memory` | 内存上限，包含固定内存和 virtio-mem 池 |
+| `virtio-mem` | 可热插拔的内存池；固定内存为 `memory - virtio-mem` |
+| `balloon` | 最低内存目标，不能低于固定内存 |
+| `shares` | PVE 自动调度权重；设为 `0` 关闭自动调度 |
+
+以下示例为一台已关机的 Q35 Linux 虚拟机配置 4–16 GiB 内存，其中 12 GiB 由 virtio-mem 管理：
+
+```sh
+vmid=9000 # 修改为 VM 编号
+qm set "$vmid" --numa 1 --sockets 1
+qm set "$vmid" --memory 16384 --balloon 4096 --virtio-mem 12288 --shares 1000
+```
+
+在客户机的内核启动参数中加入：
+
+```text
+memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotplug.auto_movable_ratio=301
+```
+
+配置完成后启动虚拟机。更改 virtio-mem 池大小需要完整关机再启动。
+参数约束和内存在线策略见 [配置文档](docs/configuration.md)。
+
+## 支持范围
+
+已在 GPU/VFIO 直通 VM 上验证内存增减、宿主 RAM 回收、PVE 统计和原生自动调度。
+缩容后的本地 CUDA 与 TensorFusion SHMEM 向量加法测试通过。
+
+实机测试使用 PVE 9.2、QEMU 11、Linux 6.18、qemu-server 9.1.17；
+qemu-server 9.2.11 已完成补丁应用、模块加载和回滚测试。
+
+目前为开发版本。hugepages、DIMM 内存热插拔、virtio-fs 和 SEV/TDX 暂不支持；
+迁移、HA 和带运行状态的快照尚未验证。客户机中的固定页或不可移动页可能阻止部分内存拔除。
+详细记录见 [已知限制](docs/known-issues.md)。
+
+## 开发
+
+Debian 构建依赖：`build-essential`、`debhelper`、`dpkg-dev`、`fakeroot`、Perl、Python 3、GNU patch。
 
 ```sh
 make test
 make deb
-# macOS 的 /tmp 是符号链接，使用解析后的临时目录：
-PROJECT_TMP_BASE=/private/tmp make test
 ```
 
-Debian 构建需要 `build-essential`、`debhelper`、`dpkg-dev`、Perl、Python 3 和 GNU patch。
-生成的包位于项目独立临时目录的 `build/deb/` 下；GitHub CI 提供构建产物。
+`make deb` 会打印构建产物的输出路径。
+macOS 使用 `PROJECT_TMP_BASE=/private/tmp make test`。
+实现说明见 [架构文档](docs/architecture.md)。
 
-| 检查 | 已验证范围 |
-| --- | --- |
-| 适配器 | 35 项检查：上下限、对齐、普通 VM 不变、异步统计和请求转换 |
-| 安装生命周期 | 7 项测试：幂等、回滚、升级、中断恢复、管理员改动及备份损坏保护 |
-| 真实包副本 | qemu-server 9.1.17、9.2.11：补丁、模块加载、回滚校验 |
-| QEMU | 11.0：设备、QMP 调整与显卡／IVSHMEM 固定 PCI 地址回归测试通过 |
-| GPU/VFIO 实机 | 完整关闭再启动成功；virtio-mem 驱动与原生内存在线策略生效 |
-| RAM 实际回收 | 增减周期的 QMP 实际容量、客户机 MemTotal 与宿主 cgroup 占用一致变化；可回收池全部拔除 |
-| PVE 统计与自动调度 | 上限、实际分配、客户机用量正确；恢复 shares 后观察到 pvestatd 自动调整 virtio-mem |
-| CUDA 与 SHMEM | 缩容后本地 CUDA 向量加法通过，现有 VM／LXC SHMEM 客户端并发运算通过 |
+## 来源与许可
 
-验证覆盖 Linux Q35 的基础内存增减和 CUDA 向量加法；具体范围与尚未覆盖的操作见
-[验收与已知限制](docs/known-issues.md)。
+派生自 [rcarmo/pve-microvm](https://github.com/rcarmo/pve-microvm)。
+上游 microvm 相关源码保留在仓库中，不包含在本软件包内。
 
-## 文档
-
-- [安装、升级与卸载](docs/installation.md)
-- [参数与客户机配置](docs/configuration.md)
-- [架构及复用边界](docs/architecture.md)
-- [已知限制与验收](docs/known-issues.md)
-
-原 microvm 内核、OCI 工具和 UI 等源文件保留用于历史及复用参考，**不进入此项目的安装包**。
-[原上游 README](docs/upstream-readme.md) 与未改写的 microvm 文档仅描述上游产品。
-
-Apache-2.0；原上游署名保留。PVE 源码补丁的上下文来自 Proxmox
-[qemu-server](https://git.proxmox.com/?p=qemu-server.git)，该部分遵循其原有许可。
+项目代码采用 [Apache-2.0](LICENSE)；包含 Proxmox 源码上下文的补丁采用
+[AGPL-3.0-or-later](LICENSES/AGPL-3.0-or-later.txt)。
