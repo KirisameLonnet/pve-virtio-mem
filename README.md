@@ -7,6 +7,30 @@
 转换为 virtio-mem 热插拔，调度仍由 PVE 原生的 `pvestatd` 和 `shares` 管理。
 宿主内存充裕时可以扩容，内存紧张时缩容；最低内存是缩容下限。
 
+## 与 pve-microvm 的区别
+
+`pve-microvm` 用于创建轻量虚拟机；`pve-virtio-mem` 为普通 Q35 虚拟机接入弹性内存。
+
+| 对比项 | pve-microvm | pve-virtio-mem |
+| --- | --- | --- |
+| 主要用途 | OCI 镜像、沙箱、unikernel 等轻量工作负载 | GPU／PCI 直通 VM 缩容时释放宿主 RAM |
+| QEMU 机型 | `microvm` | 标准 `q35` |
+| 启动与内核 | 直接加载 kernel、initrd，提供精简内核 | 使用客户机原有内核，保留 BIOS／UEFI 启动 |
+| GPU 与显示 | 不支持 `hostpci` 和常规显卡设备，使用串口控制台 | 保留 PVE 显卡与 PCI 直通，可用于桌面 VM |
+| 客户机系统 | Linux、部分 BSD、Plan 9、unikernel 等 | 当前仅支持 Linux |
+| virtio-mem | 已有设备支持，通过 QMP 手动调整 | 将 PVE 自动调度目标转换为 virtio-mem 热插拔请求 |
+| balloon | 执行普通 balloon 调整并提供统计 | 提供客户机统计；调整请求交给 virtio-mem 执行 |
+| 内存统计 | 使用原有 balloon 统计 | 结合 virtio-mem 实际接入容量，修正分配量与上限 |
+| 配套工具 | OCI 导入、模板、临时 VM、目录共享、vsock、Web UI 扩展 | 内存接入与软件包维护工具 |
+| 补丁维护 | dpkg 触发器及早期开机补丁服务 | dpkg 触发器维护持久补丁，无新增开机服务 |
+| 当前限制 | 不支持标准 PC 的多种硬件设备 | 单 socket、单 NUMA；hugepages、DIMM 热插拔、virtio-fs 等暂不支持 |
+
+上游功能见 [配置文档](https://github.com/rcarmo/pve-microvm/blob/main/docs/configuration.md)
+和 [安装维护代码](https://github.com/rcarmo/pve-microvm/blob/main/debian/pve-microvm.postinst)，
+本项目的接入方式见 [架构文档](docs/architecture.md)。
+
+两者都通过 Debian 软件包修改 PVE 内部代码，当前不能同时安装。
+
 ## 安装
 
 要求 PVE 9、QEMU 10 或以上、qemu-server 9.1.17 或以上。
