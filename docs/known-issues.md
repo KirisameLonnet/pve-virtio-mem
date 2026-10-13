@@ -30,3 +30,7 @@ Software-copy tests: qemu-server 9.1.17 and 9.2.11 loaded with PVE dependencies;
 apply twice and hash-verified rollback succeeded. QEMU 11.0 accepted a paused
 TCG topology and requested-size updates. The paused guest intentionally did not
 plug memory; this test makes no reclamation or GPU performance claim.
+
+The full PVE Q35 command builder also accepted a synthetic opt-in configuration,
+including the fixed RAM backend, virtio-mem device and balloon statistics device.
+No real guest was started during that check.
