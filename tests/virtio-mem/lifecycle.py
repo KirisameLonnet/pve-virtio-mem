@@ -38,10 +38,12 @@ class Lifecycle(unittest.TestCase):
         self.checksums()
 
     def checksums(self):
-        path = self.root / 'var/lib/dpkg/info/qemu-server.md5sums'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(''.join(f'{hashlib.md5(data).hexdigest()}  {name}\n'
-                                for name, data in self.originals.items()))
+        for package in ('qemu-server', 'pve-manager'):
+            path = self.root / f'var/lib/dpkg/info/{package}.md5sums'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(''.join(f'{hashlib.md5(data).hexdigest()}  {name}\n'
+                                    for name, data in self.originals.items()
+                                    if ('/pve-manager/' in name) == (package == 'pve-manager')))
 
     def run_tool(self, action, success=True):
         result = subprocess.run([sys.executable, str(REPO/'tools/pve-virtio-mem-patch'),
@@ -98,6 +100,36 @@ class Lifecycle(unittest.TestCase):
         self.run_tool('status', False)
         self.run_tool('apply')
         self.run_tool('status')
+
+    def test_frontend_upgrade_and_rollback(self):
+        self.run_tool('apply')
+        name = 'usr/share/pve-manager/js/pvemanagerlib.js'
+        self.originals[name] += b'// new pve-manager revision\n'
+        (self.root/name).write_bytes(self.originals[name])
+        self.checksums()
+        self.run_tool('apply')
+        self.run_tool('status')
+        self.run_tool('revert')
+        self.assertEqual(self.originals, self.snapshot())
+
+    def test_frontend_admin_edit_is_not_overwritten(self):
+        self.run_tool('apply')
+        path = self.root/'usr/share/pve-manager/js/pvemanagerlib.js'
+        path.write_bytes(path.read_bytes() + b'// administrator edit\n')
+        before = self.snapshot()
+        result = self.run_tool('apply', False)
+        self.assertIn('installed pve-manager package', result.stderr)
+        self.run_tool('revert', False)
+        self.assertEqual(before, self.snapshot())
+
+    def test_frontend_preflight_prevents_backend_writes(self):
+        name = 'usr/share/pve-manager/js/pvemanagerlib.js'
+        self.originals[name] = b'// incompatible pve-manager source\n'
+        (self.root/name).write_bytes(self.originals[name])
+        self.checksums()
+        before = self.snapshot()
+        self.run_tool('apply', False)
+        self.assertEqual(before, self.snapshot())
 
     def test_damaged_backup_rejected(self):
         self.run_tool('apply')

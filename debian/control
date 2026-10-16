@@ -2,7 +2,7 @@ Source: pve-virtio-mem
 Section: admin
 Priority: optional
 Maintainer: KirisameLonnet <KirisameLonnet@users.noreply.github.com>
-Build-Depends: debhelper-compat (= 13), perl, python3, patch
+Build-Depends: debhelper-compat (= 13), perl, python3, patch, nodejs
 Standards-Version: 4.6.2
 Homepage: https://github.com/KirisameLonnet/pve-virtio-mem
 

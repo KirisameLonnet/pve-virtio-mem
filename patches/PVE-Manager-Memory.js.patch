@@ -1,0 +1,164 @@
+--- a/usr/share/pve-manager/js/pvemanagerlib.js
++++ b/usr/share/pve-manager/js/pvemanagerlib.js
+@@ -56854,7 +56854,7 @@
+                 defaultValue: '512',
+                 tdCls: 'pve-itype-icon-memory',
+                 group: 2,
+-                multiKey: ['memory', 'balloon', 'shares', 'allow-ksm'],
++                multiKey: ['memory', 'balloon', 'shares', 'virtio-mem', 'allow-ksm'],
+                 renderer: function (value, metaData, record, ri, ci, store, pending) {
+                     var res = '';
+ 
+@@ -56872,6 +56872,11 @@
+                         }
+                     } else if (balloon === 0) {
+                         res += ' [balloon=0]';
++                    }
++
++                    let pool = me.getObjectValue('virtio-mem', 0, pending);
++                    if (pool > 0) {
++                        res += ' [virtio-mem=' + Proxmox.Utils.format_size(pool * 1024 * 1024) + ']';
+                     }
+ 
+                     let allowKsm = me.getObjectValue('allow-ksm', undefined, pending);
+@@ -57029,6 +57034,9 @@
+                 visible: false,
+             },
+             balloon: {
++                visible: false,
++            },
++            'virtio-mem': {
+                 visible: false,
+             },
+             hotplug: {
+@@ -58346,6 +58354,38 @@
+         },
+     },
+ 
++    validateVirtioMem: function () {
++        let pool = this.down('field[name=virtio-mem]')?.getValue() || 0;
++        if (pool === 0) {
++            return true;
++        }
++        let memory = this.down('field[name=memory]')?.getValue();
++        let minimum = this.down('field[name=balloon]')?.getValue();
++        let ballooning = this.down('field[name=ballooning]')?.getValue();
++        if (memory === undefined || minimum === undefined || ballooning === undefined) {
++            return true;
++        }
++        if (!ballooning) {
++            return gettext('virtio-mem requires the ballooning device for statistics.');
++        }
++        if (pool <= 0 || memory - pool < 1024) {
++            return gettext('virtio-mem must leave at least 1024 MiB of fixed memory.');
++        }
++        if (memory % 2 || pool % 2 || minimum % 2) {
++            return gettext('virtio-mem memory values must be multiples of 2 MiB.');
++        }
++        if (minimum < memory - pool || minimum > memory) {
++            return gettext('Minimum memory must be between fixed memory and maximum memory.');
++        }
++        return true;
++    },
++
++    validateVirtioMemFields: function () {
++        ['memory', 'balloon', 'virtio-mem'].forEach((name) => {
++            this.down('field[name=' + name + ']')?.validate();
++        });
++    },
++
+     onGetValues: function (values) {
+         let res = {};
+ 
+@@ -58362,6 +58402,14 @@
+                 res[prop] = values[prop];
+             }
+         });
++
++        if (!this.insideWizard) {
++            if (values['virtio-mem'] > 0) {
++                res['virtio-mem'] = values['virtio-mem'];
++            } else {
++                deleteSet.add('virtio-mem');
++            }
++        }
+ 
+         res.balloon = values.balloon;
+ 
+@@ -58399,6 +58447,7 @@
+                 minValue: 1,
+                 step: 32,
+                 hotplug: me.hotplug,
++                validator: () => me.validateVirtioMem(),
+                 listeners: {
+                     change: function (f, value, old) {
+                         var bf = me.down('field[name=balloon]');
+@@ -58408,10 +58457,38 @@
+                             bf.setValue(value);
+                         }
+                         bf.validate();
++                        me.validateVirtioMemFields();
+                     },
+                 },
+             },
+         ];
++
++        if (!me.insideWizard) {
++            me.items.push(
++                {
++                    xtype: 'pveMemoryField',
++                    name: 'virtio-mem',
++                    fieldLabel: 'virtio-mem (MiB)',
++                    labelWidth: labelWidth,
++                    value: 0,
++                    minValue: 0,
++                    step: 2,
++                    validator: () => me.validateVirtioMem(),
++                    listeners: {
++                        change: () => me.validateVirtioMemFields(),
++                    },
++                },
++                {
++                    xtype: 'box',
++                    style: 'white-space: normal;',
++                    html: gettext(
++                        'Removable pool included in Memory; 0 disables it. Pool changes require a full shutdown and start.',
++                    ) + '<br>' + gettext(
++                        'Requires Linux, Q35, NUMA and one socket; disable memory hotplug.',
++                    ),
++                },
++            );
++        }
+ 
+         me.advancedItems = [
+             {
+@@ -58425,11 +58502,13 @@
+                 hotplug: me.hotplug,
+                 labelWidth: labelWidth,
+                 allowBlank: false,
++                validator: () => me.validateVirtioMem(),
+                 listeners: {
+                     change: function (f, value) {
+                         var memory = me.down('field[name=memory]').getValue();
+                         var shares = me.down('field[name=shares]');
+                         shares.setDisabled(value === memory);
++                        me.validateVirtioMemFields();
+                     },
+                 },
+             },
+@@ -58460,6 +58539,7 @@
+                         var memory = me.down('field[name=memory]');
+                         bf.setDisabled(!value);
+                         shares.setDisabled(!value || bf.getValue() === memory.getValue());
++                        me.validateVirtioMemFields();
+                     },
+                 },
+             },
+@@ -58528,6 +58608,7 @@
+                     ballooning: data.balloon === 0 ? '0' : '1',
+                     shares: data.shares,
+                     memory: data.memory || '512',
++                    'virtio-mem': data['virtio-mem'] || 0,
+                     balloon: data.balloon > 0 ? data.balloon : data.memory || '512',
+                     'allow-ksm': data['allow-ksm'] ?? true,
+                 };

@@ -10,6 +10,43 @@ balloon and shares fields keep their PVE meanings:
 | `balloon` | Minimum target; must be between fixed boot RAM and maximum |
 | `shares` | Native PVE scheduler weight; zero disables automatic adjustments |
 
+## Web interface
+
+Open **VM → Hardware → Memory → Edit** and set **virtio-mem (MiB)**.
+Minimum memory, shares and the balloon statistics device remain in PVE's
+advanced options. The pool is included in Memory, not added to it. The editor
+validates the fixed-memory floor, minimum/maximum relationship, 2 MiB alignment
+and enabled balloon statistics. Set the pool to zero to disable it.
+
+Pool changes appear in the memory row's native pending configuration and can
+be reverted there. They require a full shutdown and start. The editor does
+not change the machine type, NUMA, sockets or guest boot parameters; configure
+those prerequisites separately. The create-VM wizard is unchanged.
+
+## Startup and scheduling
+
+The plugin follows native PVE startup targets and scheduling. The initial
+allocation is the configured balloon target, or maximum RAM when that property
+is absent. The native startup balloon command is unchanged. PVE owns minimum
+targets, host-pressure policy, shares, scheduling intervals and rate limits.
+In particular, the native 100 MiB scheduling step can make a large increase
+slow; the plugin does not force maximum allocation or pause scheduling.
+
+`shares=0` retains PVE's manual allocation behavior. Lowering that target live
+must be allowed even while the old value remains in the active config; the
+adapter therefore enforces only physical fixed-RAM/maximum bounds on QMP
+requests. PVE applies the policy minimum. Configured minimum memory must still
+be at least fixed RAM.
+
+Allocation statistics always use actual plugged RAM, including while a larger
+request is outstanding. The underlying virtio-mem hotplug is asynchronous and
+aligned to 2 MiB blocks. Matching PVE management semantics does not make its
+completion latency identical to ordinary ballooning or guarantee guest
+onlining. A manual QMP target can be superseded by native automatic scheduling
+while shares are nonzero, just as with native balloon management.
+
+## Example and constraints
+
 Synthetic example for a **stopped disposable guest**:
 
 ```sh
@@ -56,6 +93,6 @@ block size or additional VFIO mapping capacity; this preview exposes neither
 as a config option. Do not assume arbitrary pool sizes or every passthrough
 device are supported.
 
-PVE scheduling remains gradual and driven by host pressure, not immediate
-application demand. A minimum is not an idle-memory target. Configure a
+Subsequent PVE scheduling remains gradual and driven by host pressure, not
+immediate application demand. A minimum is not an idle-memory target. Configure a
 minimum sufficient for the guest workload and measure actual reclamation.

@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: echo "PROJECT_TMP_BASE=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential dpkg-dev debhelper fakeroot perl python3 patch
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential dpkg-dev debhelper fakeroot perl python3 patch nodejs
       - run: make test
       - run: make deb
       - name: Inspect package

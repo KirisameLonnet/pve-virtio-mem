@@ -1,42 +1,29 @@
-# Web UI
+# Web memory configuration
 
-## Create µVM button
+After installing the package, refresh the PVE browser tab and open
+**VM → Hardware → Memory → Edit**. The native dialog contains a
+**virtio-mem (MiB)** field directly below Memory.
 
-The PVE header toolbar has a **Create µVM** button (⚡ bolt icon) next to
-Create VM and Create CT. It opens a dialog with:
+- Memory is the total maximum, including the removable pool.
+- virtio-mem is the removable pool. Set it to zero to disable the option.
+- Minimum memory and Shares remain in the native advanced options.
+- Keep Ballooning Device enabled for statistics.
 
-- OCI image selector (12 Linux distros + specialist OS, freeform entry)
-- Profile picker (minimal / standard / full)
-- Storage picker (auto-filtered by node)
-- VM ID (auto-populated from cluster)
-- Memory, cores, disk size fields
+For example, Memory 16384, minimum 4096 and virtio-mem 12288 define a
+4–16 GiB VM with 4 GiB of fixed RAM. The editor checks memory relationships
+and 2 MiB alignment. Linux, Q35, NUMA, one socket and disabled DIMM memory
+hotplug must also be configured; the dialog does not silently change them.
 
-The same option appears in the node right-click context menu.
+Pool edits use the native VM configuration API and VM.Config.Memory
+permission. The hardware memory row shows the pool in both current and
+pending values. Native Revert includes the pool together with the other
+memory settings. A pool change requires a full shutdown and start; saving
+the dialog does not restart the guest.
 
-## Microvm VM features
+The create-VM wizard is unchanged. Configure an existing stopped VM before
+its first virtio-mem boot. This fork does not package the upstream Create
+µVM button or other microvm UI modifications.
 
-When a VM uses `machine: microvm`:
-
-- **Resource tree**: ⚡ amber bolt icon (running/stopped/template states)
-- **Console tab**: xterm.js serial terminal with bolt icon
-- **Console button**: forces xterm.js (not noVNC)
-- **Hardware view**: USB, PCI, BIOS, EFI, TPM, audio rows hidden
-- **Add hardware menu**: unsupported devices disabled
-- **Machine edit**: vIOMMU and version options hidden
-- **Options panel**: unsupported options marked n/a
-- **Context menu**: ⚡ Serial Console + ⚡ Clone microvm
-- **Template right-click**: one-click clone
-
-## Dark mode
-
-All UI elements support PVE's dark theme automatically.
-
-## Tags
-
-Add `microvm` tag to any VM for the ⚡ icon:
-
-```bash
-qm set <vmid> --tags microvm
-```
-
-The template tool sets this automatically.
+See [configuration](configuration.md) for startup/scheduling semantics and
+guest prerequisites. pve-manager upgrades reapply the guarded bundle patch
+through dpkg file triggers; unknown administrator changes are not overwritten.

@@ -12,11 +12,12 @@ repository's Actions page. There is no stable release yet.
 The package requires PVE 9, QEMU 10 or newer and qemu-server 9.1.17 or newer.
 Package-copy compatibility was tested with qemu-server 9.1.17 and 9.2.11 only;
 a version constraint is not a guarantee that future source layouts will work.
+The frontend patch and browser fixture were tested with pve-manager 9.2.21.
 It conflicts with pve-microvm because both edit the same PVE source files.
 
 ## What installation does
 
-1. Install the small Perl adapter and standard unified patches.
+1. Install the small Perl adapter and unified backend/web editor patches.
 2. Verify PVE source against the installed Debian package checksums.
 3. Preflight every patch with zero fuzz before modifying any PVE file.
 4. Journal the originals and SHA-256 hashes in `/var/lib/pve-virtio-mem`.
@@ -24,10 +25,13 @@ It conflicts with pve-microvm because both edit the same PVE source files.
 
 Running guests are not restarted. Existing VMs without `virtio-mem` keep their
 native memory builder and balloon commands. Package installation changes PVE
-Perl files, so this is not an official Proxmox extension API.
+Perl files and the pve-manager JavaScript bundle, so this is not an official
+Proxmox extension API. Refresh the browser after installation to load the
+new **Hardware → Memory → Edit → virtio-mem (MiB)** field.
 
 The edits persist across boots. Debian file triggers reapply them when
-qemu-server is upgraded. No early-boot patch service or package hold is used.
+qemu-server or the pve-manager JavaScript bundle is upgraded. No early-boot
+patch service or package hold is used.
 Unknown edits or incompatible upstream changes fail package configuration
 before writing patches. Resolve the version mismatch and rerun
 `dpkg --configure -a`; do not bypass checksum checks.

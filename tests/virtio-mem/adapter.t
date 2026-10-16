@@ -29,8 +29,9 @@ for my $target (4095,16385) {
     eval { PVE::QemuServer::VirtioMem::translate_balloon($conf,'balloon',{value=>$target*$mib}) };
     like($@,qr/outside/,'reject target outside range');
 }
-eval { PVE::QemuServer::VirtioMem::translate_balloon({%$conf, balloon=>8192},'balloon',{value=>4096*$mib}) };
-like($@,qr/outside/,'honor minimum above base');
+(undef, $args) = PVE::QemuServer::VirtioMem::translate_balloon(
+    {%$conf, balloon=>8192, shares=>0},'balloon',{value=>4096*$mib});
+is($args->{value},0,'native pending minimum decrease is allowed above fixed boot RAM');
 my @command;
 PVE::QemuServer::VirtioMem::config($conf,9000,1,4,0,0,\@command,{});
 ok(!grep(/virtio-mem-pci/,@command),'memory builder defers automatic PCI placement');
@@ -39,11 +40,16 @@ PVE::QemuServer::VirtioMem::add_device($conf,\@command);
 like($command[-1],qr/^virtio-mem-pci/,'memory device follows explicitly addressed devices');
 is_deeply([@command[0,1]],['-m','4096M,slots=1,maxmem=16384M'],'fixed boot RAM and maximum');
 like(join(' ',@command),qr/memory-backend-ram,id=vmem0,size=12288M,reserve=off,prealloc=off/,'sparse removable pool');
-like(join(' ',@command),qr/requested-size=0M/,'boot at configured minimum');
+like(join(' ',@command),qr/requested-size=0M/,'boot at native configured minimum');
 @command=();
 PVE::QemuServer::VirtioMem::config({%$conf,balloon=>8192},9000,1,4,0,0,\@command,{});
 PVE::QemuServer::VirtioMem::add_device({%$conf,balloon=>8192},\@command);
 like(join(' ',@command),qr/requested-size=4096M/,'minimum above base starts partially plugged');
+for my $shares (0,1000) {
+    @command=();
+    PVE::QemuServer::VirtioMem::add_device({%$conf,balloon=>8192,shares=>$shares},\@command);
+    like(join(' ',@command),qr/requested-size=4096M/,"native initial target with shares=$shares");
+}
 for my $invalid ({'virtio-mem'=>16384},{balloon=>0},{balloon=>4097},{numa=>0},
                  {machine=>'pc'},{numa0=>'cpus=0-3'},{hugepages=>2},{ostype=>'win11'}) {
     eval { my @c; PVE::QemuServer::VirtioMem::config({%$conf,%$invalid},9000,1,4,0,0,\@c,{}) };
@@ -73,4 +79,14 @@ my $info = {actual=>4096*$mib,max_mem=>4096*$mib,total_mem=>6000,free_mem=>2000}
 ok(PVE::QemuServer::VirtioMem::normalize_stats($info,$cache->{9000}),'normalize successful query');
 is_deeply($info,{actual=>6144*$mib,max_mem=>16384*$mib,total_mem=>6000,free_mem=>2000},
           'use actual size, never requested size; preserve guest counters');
+$client->[0][1]->(9000,{return=>[
+    {type=>'virtio-mem',data=>{id=>'vmem0',size=>2048*$mib,'requested-size'=>12288*$mib}},
+]});
+PVE::QemuServer::VirtioMem::normalize_stats($info,$cache->{9000});
+is($info->{actual},6144*$mib,'pending expansion still reports actual allocation');
+$client->[0][1]->(9000,{return=>[
+    {type=>'virtio-mem',data=>{id=>'vmem0',size=>12288*$mib,'requested-size'=>12288*$mib}},
+]});
+PVE::QemuServer::VirtioMem::normalize_stats($info,$cache->{9000});
+is($info->{actual},16384*$mib,'completed expansion reports full actual allocation');
 done_testing;

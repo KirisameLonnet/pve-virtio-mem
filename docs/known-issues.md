@@ -36,6 +36,12 @@ Live migration, HA recovery, suspend-to-disk, snapshots containing VM state,
 hotplugging the memory device itself, multiple NUMA nodes, hugepages, virtio-fs,
 confidential VMs and non-Linux guests are outside the validated scope.
 Dynamic KVM memory slots and configurable block sizes are future work.
+Requested hugepages, DIMM hotplug, virtio-fs and SEV/TDX compatibility work is
+tracked in the [roadmap](roadmap.md); none is enabled by the GUI addition.
+
+The GUI and live manual-target decrease fix require new live acceptance.
+Earlier live validation above predates these changes. Offline adapter tests
+do not establish guest onlining or VFIO RAM reclamation for a new workload.
 
 Software-copy tests: qemu-server 9.1.17 and 9.2.11 loaded with PVE dependencies;
 apply twice and hash-verified rollback succeeded. QEMU 11.0 accepted a paused
@@ -45,6 +51,12 @@ plug memory; this test makes no reclamation or GPU performance claim.
 The full PVE Q35 command builder also accepted a synthetic opt-in configuration,
 including the fixed RAM backend, virtio-mem device and balloon statistics device.
 No real guest was started during that check.
+
+The native memory editor was exercised in a browser with extracted
+pve-manager 9.2.21, ExtJS and widget-toolkit assets and synthetic form data.
+Loading, saving, disabling and validation passed. Native scheduler contract
+tests use the unmodified AutoBalloon implementation with equivalent status
+inputs; they do not establish identical guest hotplug latency.
 
 ## PCI device placement
 
