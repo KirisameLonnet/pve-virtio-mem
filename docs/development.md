@@ -1,91 +1,91 @@
 # Development
 
-## Repository structure
+This repository builds the Q35 memory integration described in the [README](../README.md).
+Retained upstream components are listed in [provenance](provenance.md).
 
-```
-pve-microvm/
-├── Makefile
-├── README.md
-├── RELEASE_NOTES.md
-├── LICENSE
-├── debian/                           # Debian packaging
-│   ├── changelog
-│   ├── control
-│   ├── rules
-│   ├── pve-microvm.postinst          # Apply patches + dpkg trigger
-│   ├── pve-microvm.prerm             # Revert patches
-│   ├── pve-microvm.triggers          # Watch qemu-server files
-│   └── patches/
-├── docs/                             # Documentation
-│   ├── pve-microvm-demo.gif
-│   ├── installation.md
-│   ├── usage.md
-│   ├── architecture.md
-│   ├── configuration.md
-│   ├── known-issues.md
-│   ├── limitations.md
-│   ├── troubleshooting.md
-│   └── development.md
-├── doc/                              # Config templates
-│   ├── microvm-defaults.conf
-│   └── microvm-images.conf
-├── kernel/                           # Kernel build
-│   ├── pve-microvm-6.12.config       # Overlay on defconfig
-│   ├── build-kernel.sh               # Automated build
-│   └── README.md
-├── tools/                            # Runtime tools
-│   ├── MicroVM.pm                    # Perl module
-│   ├── microvm-init                  # Init for minimal images
-│   ├── microvm-setup                 # First-boot package installer
-│   ├── pve-microvm-patch             # Patch manager
-│   ├── pve-microvm-template          # Template creator
-│   ├── pve-oci-import                # OCI importer
-│   ├── pve-microvm-share             # virtiofs share manager
-│   ├── pve-microvm-9p               # 9p share manager (no daemon)
-│   ├── pve-microvm-ssh-agent         # SSH agent forwarder
-│   ├── pve-microvm-run               # Ephemeral VM runner
-│   └── pve-microvm-bench             # Boot time benchmarking
-├── ui/                               # Web UI extensions
-│   ├── pve-microvm.css               # Icon + tag styles
-│   └── pve-microvm.js                # Wizard, hardware view, clone menu
-└── .github/workflows/
-    ├── ci.yml                        # Build on push/PR
-    └── build.yml                     # Release on tag
-```
+## Source layout
 
-## Building
+| Path | Responsibility |
+| --- | --- |
+| `tools/VirtioMem.pm` | Memory topology, native target translation and actual-allocation statistics |
+| `patches/` | Guarded qemu-server and native memory-editor integration |
+| `tools/pve-virtio-mem-patch` | Package provenance checks, durable apply/revert journal and repair CLI |
+| `debian/` | Package metadata, installation/removal hooks and dpkg file triggers |
+| `tools/pve-virtio-mem-env.sh`, `tools/lib/project-tmp.sh` | Development scratch and cache isolation |
+| `tests/virtio-mem/` | Adapter, native scheduler, package lifecycle, GUI and path checks |
+| `scripts/` | Isolated package build, real-package checks and pre-release profiling |
+| `experimental/transparent/` | Separate source/build and TCG acceptance prototype |
 
-```bash
-# Build .deb (without kernel)
+The Debian package installs the adapter, five integration patches, patch manager
+and package documentation. It does not build or install the research QEMU/kernel.
+There is no legacy kernel or OCI/template build target.
+
+## Functional and package checks
+
+On Debian/Ubuntu, install `git build-essential dpkg-dev debhelper fakeroot perl
+python3 patch nodejs`. Add `valgrind` for pre-release profiling.
+
+```sh
+make test
 make deb
-
-# Build kernel + initrd
-make kernel
-
-# Full release (done by CI on tag push)
-git tag -a v0.X.Y -m "..." && git push origin v0.X.Y
 ```
 
-## Testing locally
+The functional suite runs without PVE services or guest access. It checks native
+scheduler decisions, command translation, frontend behavior, package lifecycle
+guards, path ownership/isolation and transparent-acceptance false-positive guards.
+`make deb` stages and tests a copy under the project build root.
 
-```bash
-scp tools/MicroVM.pm root@pve:/usr/share/perl5/PVE/QemuServer/MicroVM.pm
-scp ui/pve-microvm.js root@pve:/usr/share/pve-manager/js/pve-microvm.js
-ssh root@pve qm create 999 --machine microvm --memory 128
-ssh root@pve qm destroy 999
+For a non-PVE macOS development host, `PROJECT_TMP_BASE=/private/tmp make test`
+uses the real temp directory. Build Debian packages in an isolated Linux environment.
+
+To exercise official PVE package copies without changing the running host:
+
+```sh
+bash scripts/check-package.sh <qemu-server.deb> <pve-manager.deb>
 ```
 
-## Key source references
+This extracts the packages into disposable staging, applies twice, checks the
+native editor, and verifies rollback against package hashes. With matching PVE
+Perl dependencies installed, it also loads the staged modules. The optional
+`tests/virtio-mem/qemu-smoke.py` accepts a QEMU executable for a paused topology
+and PCI-placement check; a paused test proves no guest allocation or reclamation.
 
-- `tools/MicroVM.pm` — QEMU command generation, device selection, config validation
-- `tools/pve-microvm-patch` — Python-based patching of Machine.pm and QemuServer.pm
-- `ui/pve-microvm.js` — ExtJS monkey-patches for PVE web UI
-- `kernel/build-kernel.sh` — defconfig + overlay + module + initrd build
-- `kernel/pve-microvm-6.12.config` — kernel config overlay
+## Profiling and cleanup
 
-## References
+```sh
+make test-profile
+```
 
-- [QEMU microvm docs](https://www.qemu.org/docs/master/system/i386/microvm.html)
-- [Proxmox `qemu-server` source](https://git.proxmox.com/git/qemu-server.git)
-- [Proxmox `pve-manager` source](https://git.proxmox.com/git/pve-manager.git)
-- [virtio-mmio specification](https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html)
+Before release, the complete functional gate is followed by equivalent adapter
+workloads under Callgrind and Memcheck. Analyse CPU instruction events and
+cumulative allocated bytes/objects, then tune avoidable work only when evidence
+supports it. Test-interpreter totals do not establish per-VM runtime performance.
+The script writes concise conclusions to `docs/profiling/latest.md` and deletes
+raw captures, annotations and disposable logs after use, including failures.
+Ordinary development tests need not be profiled on every run.
+Run this from a Git checkout so the summary can record its source revision.
+
+The generic resolver chooses the canonical `pve-virtio-mem` root using
+`PROJECT_TMP_BASE` or `PROJECT_TMP_ROOT`, with ownership and symlink checks.
+Caches, build copies and runs stay beneath that root. Stop owning jobs before
+removing completed disposable scratch; preserve intentional release assets.
+Guest runtime paths are separate from host development scratch.
+
+## Transparent reclamation experiment
+
+`make transparent-build` and `make transparent-test` are explicit opt-in targets.
+See [the prototype README](../experimental/transparent/README.md) for dependencies,
+source locks, negative control and cleanup. These launch a new isolated TCG guest
+with a matching research kernel. They do not access PVE guests or establish
+VFIO safety, current PVE compatibility or production support.
+
+## CI and review
+
+The CI workflow runs functional tests, builds and lists the development package,
+and retains its intentional `.deb` artifact. A manually dispatched pre-release
+workflow runs profiling and retains only conclusions. Both dispose build scratch.
+Neither workflow currently publishes a tagged release.
+
+Keep source changes and public reports scoped to the product. Use synthetic
+fixtures; never publish managed-host identities, workload details or raw logs.
+Live tests and deployment require their own authorised scope and acceptance gates.

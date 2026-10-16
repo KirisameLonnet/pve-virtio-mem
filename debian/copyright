@@ -17,3 +17,11 @@ License: AGPL-3+
  and pve-manager and modifications to that code. They are distributed under
  GNU Affero GPL version 3 or later.
  See LICENSES/AGPL-3.0-or-later.txt for the complete license.
+
+Files: experimental/transparent/patches/linux-init-section.patch
+Copyright: Lars Wrenger and HyperAlloc/LLFree contributors
+           2026 KirisameLonnet
+License: GPL-2.0-only
+ This patch follows the pinned HyperAlloc Linux kernel's COPYING terms.
+ See LICENSES/GPL-2.0-only.txt for the complete GNU GPL version 2.
+ On Debian systems it is also available at /usr/share/common-licenses/GPL-2.

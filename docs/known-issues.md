@@ -6,14 +6,17 @@ guest MemTotal and host cgroup consumption consistently. The removable pool
 was fully unplugged and the corresponding host RAM was released.
 
 PVE allocation and guest-use statistics were correct. Re-enabling native shares
-resulted in pvestatd automatically growing the virtio-mem device. Local CUDA
-vector addition and concurrent existing SHMEM client vector addition passed
-after shrinking. SSH, guest agent, graphical login, persistent data mounting
-and the worker service remained functional after a cold start.
+resulted in pvestatd automatically growing the virtio-mem device. Basic GPU
+compute smoke tests passed after shrinking.
 
 These are basic live acceptance results, alongside adapter, package-lifecycle,
 real-package-copy and paused QEMU checks. They do not establish compatibility
 with every application, active pinned-memory workload or lifecycle operation.
+
+These results cover guest-capacity-changing hotplug. The separate
+[transparent-reclamation prototype](../experimental/transparent/README.md)
+has only isolated TCG acceptance; it establishes no live VFIO, current PVE
+or desktop workload support.
 
 When validating another deployment or workload, check the following:
 

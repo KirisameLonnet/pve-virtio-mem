@@ -1,0 +1,34 @@
+Subject: [PATCH] llfree: mark memblock-only node construction as init code
+
+llfree_node_init allocates allocator metadata exclusively through memblock.
+Its only call site in this pinned tree is in a disabled init-only DAX probe.
+Mark the declaration and definition __init so modpost checks the actual
+lifetime instead of disabling section mismatch errors for the test kernel.
+
+diff --git a/mm/llfree/include/llfree_alloc.h b/mm/llfree/include/llfree_alloc.h
+--- a/mm/llfree/include/llfree_alloc.h
++++ b/mm/llfree/include/llfree_alloc.h
+@@ -4,9 +4,10 @@
+ #ifdef CONFIG_LLFREE
+ 
+ #include <llfree.h>
++#include <linux/init.h>
+ 
+ /// Create a new allocator instance for the given node
+-llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
++llfree_t * __init llfree_node_init(size_t node, size_t cores, size_t start_pfn,
+ 			   size_t pages);
+ 
+ #endif // CONFIG_LLFREE
+diff --git a/mm/llfree/llfree.c b/mm/llfree/llfree.c
+--- a/mm/llfree/llfree.c
++++ b/mm/llfree/llfree.c
+@@ -24,7 +24,7 @@ void noinline llfree_panic(void)
+ 	llfree_warn("panic");
+ }
+ 
+-llfree_t *llfree_node_init(size_t node, size_t cores, size_t start_pfn,
++llfree_t * __init llfree_node_init(size_t node, size_t cores, size_t start_pfn,
+ 			   size_t pages)
+ {
+ 	cores = 1; // only one core for now
