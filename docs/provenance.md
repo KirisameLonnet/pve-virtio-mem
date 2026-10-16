@@ -31,25 +31,29 @@ scheduling, API permissions, QMP transport, polling and VM lifecycle.
 
 ## Separate research prototype
 
-The optional transparent-reclaim experiment fetches
-[HyperAlloc QEMU](https://github.com/luhsra/hyperalloc-qemu),
-[HyperAlloc Linux](https://github.com/luhsra/hyperalloc-linux) and
-[LLFree](https://github.com/luhsra/llfree-c) at the exact revisions in
-[`sources.json`](../experimental/transparent/sources.json). These are research
-dependencies, not pve-microvm components or dependencies of the Debian plugin.
-Their original attribution, licenses and Git metadata stay in the fetched
-source trees. They are not vendored or included in the development `.deb`.
-The local Linux init-section patch follows the upstream kernel license.
+The optional transparent-reclaim experiment fetches upstream QEMU 11, Linux
+6.18 and [LLFree](https://github.com/luhsra/llfree-c) at exact revisions in
+[`sources.json`](../experimental/transparent/sources.json). The local source
+patches port the device/shared bitmap from
+[HyperAlloc QEMU](https://github.com/luhsra/hyperalloc-qemu) and
+[HyperAlloc Linux](https://github.com/luhsra/hyperalloc-linux); their exact
+research revisions are also recorded. The Linux port retains the native buddy
+allocator rather than importing the research allocator replacement. These are
+separate experimental sources, not pve-microvm components or dependencies of
+the Debian plugin. They are not included in the development `.deb`.
+The source patches follow the QEMU/Linux GPL-2.0 terms; permissive notices
+embedded in the original source remain intact. LLFree retains its MIT license
+in the fetched source tree. Upstream attribution and Git history are retained.
 
 See [the experiment](../experimental/transparent/README.md) for the authors'
-paper, local patch, build receipt and narrowly scoped acceptance result.
+paper, source ports, build receipt and narrowly scoped acceptance result.
 
 ## Licenses
 
 The fork retains [Apache-2.0](../LICENSE) for the upstream tools and original
 fork code unless a file or the copyright manifest specifies otherwise.
 PVE patch/test context remains AGPL-3.0-or-later. The local Linux patch is
-covered by GPL-2.0-only; its license text is in
+covered by GPL-2.0-only, as is the aggregate QEMU source port; its license text is in
 [`LICENSES/GPL-2.0-only.txt`](../LICENSES/GPL-2.0-only.txt).
 [`debian/copyright`](../debian/copyright) records the applicable file groups.
 Removing unused sources does not remove their authors from Git history or

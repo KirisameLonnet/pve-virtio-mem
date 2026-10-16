@@ -1,14 +1,18 @@
 {
   "qemu": {
-    "repository": "https://github.com/luhsra/hyperalloc-qemu.git",
-    "commit": "ad01356cf917631416ea518a40f4cb4ce2871d19"
+    "repository": "https://github.com/qemu/qemu.git",
+    "commit": "98b060da3a4f92b2a994ead5b16a87e783baf77c"
   },
   "linux": {
-    "repository": "https://github.com/luhsra/hyperalloc-linux.git",
-    "commit": "628c12d183414a447e14a30414b1ee6158bf37f6"
+    "repository": "https://github.com/torvalds/linux.git",
+    "commit": "7d0a66e4bb9081d75c82ec4957c50034cb0ea449"
   },
   "llfree": {
     "repository": "https://github.com/luhsra/llfree-c.git",
     "commit": "9f10f948556c530b7b8a8a3cab605591c8d51110"
+  },
+  "derived_from": {
+    "qemu": "https://github.com/luhsra/hyperalloc-qemu/commit/ad01356cf917631416ea518a40f4cb4ce2871d19",
+    "linux": "https://github.com/luhsra/hyperalloc-linux/commit/628c12d183414a447e14a30414b1ee6158bf37f6"
   }
 }

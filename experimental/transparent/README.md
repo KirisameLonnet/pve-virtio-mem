@@ -1,94 +1,117 @@
-# Transparent reclamation prototype
+# Transparent reclamation source port
 
-This opt-in source/build experiment evaluates **constant guest-visible RAM with
-automatic physical-page reclamation and demand-driven reuse**. It is separate
-from the packaged virtio-mem hotplug adapter. No production PVE backend, GUI
-switch or replacement `/usr/bin/kvm` is installed by these commands.
+The product target is **constant guest-visible configured capacity, automatic
+idle-page reclamation and immediate demand-driven reuse**. The Debian plugin
+still implements virtio-mem hotplug, which changes guest capacity. These
+opt-in sources are a separate development step, not a production backend.
+They install no PVE changes, QEMU executable, kernel or service.
 
-The prototype reuses [HyperAlloc QEMU](https://github.com/luhsra/hyperalloc-qemu),
+## Current implementation
+
+The default build now uses upstream **QEMU 11.0.0 and Linux 6.18**, with exact
+commits in [sources.json](sources.json) and local [source patches](patches/).
+The device and shared bitmap derive from
+[HyperAlloc QEMU](https://github.com/luhsra/hyperalloc-qemu),
 [HyperAlloc Linux](https://github.com/luhsra/hyperalloc-linux) and
-[LLFree](https://github.com/luhsra/llfree-c). Their exact commits and matching
-allocator ABI are pinned in [sources.json](sources.json); no moving branches
-or SSH submodule URLs are used during builds. The upstream licenses and source
-history remain in the fetched checkouts. See the authors' [EuroSys 2025 paper](https://www.sra.uni-hannover.de/Publications/2025/hyperalloc-eurosys25/wrenger_25_eurosys.pdf).
-The local [init-section patch](patches/linux-init-section.patch) annotates an
-upstream memblock-only constructor; section mismatch errors remain enabled.
-Applied patch hashes are recorded alongside the source revisions in the build.
+[LLFree](https://github.com/luhsra/llfree-c); research revisions are recorded in
+the lock file. See the authors' [EuroSys 2025 paper](https://www.sra.uni-hannover.de/Publications/2025/hyperalloc-eurosys25/wrenger_25_eurosys.pdf).
+Attribution and licenses are retained in the patch/source files and
+[provenance](../../docs/provenance.md).
 
-HyperAlloc's automatic **soft** reclamation releases idle physical frames
-while leaving them available to the guest allocator. Its separate classic
-hard-balloon target is not used by this experiment. The QEMU device provides
-DMA population/discard coordination; this must be validated with real devices
-before any VFIO support claim for this fork.
+The kernel port **retains the native buddy allocator, per-CPU page lists and
+memory accounting**. LLFree is a shadow availability bitmap, not the page
+allocator. A successful free publishes availability after free-time hardening;
+allocation reserves the exact frame selected by the native allocator and
+synchronizes backing restoration before allocation-time initialization or
+caller access. The research tree's replacement allocator, reclaim/accounting
+changes, KVM host-kernel ioctls, DAX experiments and benchmarks are not imported.
+The constructor remains `__init`; section-mismatch errors stay enabled.
+
+The QEMU port leaves ordinary virtio-balloon compiled. The private shared ABI
+requires a negotiated feature plus matching magic/version; an ordinary balloon
+driver cannot silently negotiate this protocol. It is not a registered stable
+virtio ABI. Hard balloon requests are rejected because removing pages behind
+the native buddy allocator would corrupt its state. QMP status distinguishes
+configured capacity and device-discarded bytes; discarded bytes are not QEMU RSS.
+Unsupported migration and device hotplug are blocked.
+
+**VFIO is still unsupported in this port.** QEMU's native
+`ram_block_discard_require()` exclusion deliberately remains active, so pinned
+RAM/VFIO combinations are rejected rather than bypassing discard protection.
+The inherited RamDiscardManager code still needs a full audit/port of address
+translation, DMA ordering, error recovery and lifetime handling, followed by
+real-device acceptance. An API port or TCG pass does not establish DMA safety.
 
 ## Build and isolated acceptance
 
-Use a disposable Linux x86_64 or aarch64 development environment with Git, Clang/LLVM/LLD,
+Use a disposable Linux x86_64 or aarch64 environment with Git, Clang/LLVM/LLD,
 make, Ninja, Python 3.9+, Python venv/tomli/packaging, pkg-config, GLib/pixman,
-zlib, ELF/OpenSSL development headers, bison, flex and bc. For example, Debian
-bookworm provides these through `build-essential git clang llvm lld python3
-python3-venv python3-tomli python3-packaging ninja-build pkg-config
-libglib2.0-dev libpixman-1-dev libfdt-dev zlib1g-dev libelf-dev libssl-dev bison flex bc`.
+zlib, ELF/OpenSSL development headers, bison, flex and bc. The port was tested
+with LLVM 19 on Debian trixie. For example:
 
 ```sh
+apt install build-essential git clang llvm lld python3 python3-venv \
+    python3-tomli python3-packaging ninja-build pkg-config libglib2.0-dev \
+    libpixman-1-dev libfdt-dev zlib1g-dev libelf-dev libssl-dev bison flex bc
 make transparent-build
-# Use the exact project-owned build directory printed by that command:
+# Use the project-owned build directory printed by that command:
 make transparent-test TRANSPARENT_BUILD_DIR=<absolute-build-directory>
 ```
 
-The default build uses one job. `TRANSPARENT_BUILD_JOBS` can increase that
-within the development environment's memory budget. The minimal kernel is
-only for the synthetic test guest; it is not a desktop kernel configuration.
-The QEMU executable targets the build host; LLVM cross-compiles the x86_64
-guest kernel and init on aarch64, avoiding emulated compiler processes.
-Neither command installs kernels, binds PCI devices or accesses PVE guests.
+The default is one build job; `TRANSPARENT_BUILD_JOBS` can increase it within
+the environment's memory budget. The QEMU executable targets the build host;
+LLVM cross-compiles the x86_64 kernel and init on aarch64. Exact source revisions
+and applied patch hashes are written into the owning build directory.
 
-Acceptance boots a new diskless, networkless TCG guest. The freestanding init
-program twice allocates and touches approximately 90% of guest MemTotal,
-holds and checks live data, frees it, then allocates it again. The host runner
-requires unchanged MemTotal, preserved allocated data, successful reuse, and
-a material QEMU RSS drop after each free. Only a concise result is returned;
-guest logs are discarded after diagnosis. Fetched sources and build outputs
-stay in the owning build directory only while the current analysis needs them.
-For a negative control:
+The minimal guest kernel is not a desktop configuration. This experiment
+requires a fixed supported CPU topology and one memory node. Its Kconfig
+rejects unported combinations including memory hotplug, CMA, hugetlbfs, device
+memory, compaction, PREEMPT_RT and page poisoning. These are acceptance gaps,
+not production support claims or instructions to disable desktop protections.
+
+Acceptance launches a new diskless, networkless TCG guest. It checks private
+protocol/status negotiation and rejection of hard ballooning and migration.
+The freestanding init twice allocates/touches approximately 90% of MemTotal,
+checks live data and fresh-page zeroing, frees it, then reallocates. The runner
+requires unchanged MemTotal, successful reuse and a material QEMU RSS drop in
+both rounds. Two CPUs and native allocation/free initialization can be exercised:
 
 ```sh
 bash tools/pve-virtio-mem-env.sh --exec transparent \
-    python3 experimental/transparent/accept.py <absolute-build-directory> --no-auto-reclaim
+    python3 experimental/transparent/accept.py <absolute-build-directory> \
+    --cpus 2 --hardened-init
 ```
 
-Allocation should still complete, but physical-reclaim validation must fail
-and return a nonzero exit code. Unchanged capacity and successful allocation
-alone are insufficient.
+For a negative control, replace those options with `--no-auto-reclaim`.
+Allocation should complete, but physical-reclaim validation must fail and return
+nonzero. Capacity markers, a requested target or successful allocation alone
+are insufficient. Logs and disposable binaries are removed after analysis;
+keep only concise measurements and limitations.
 
 ## Observed isolated result
 
-With the locked sources, init-section patch and LLVM 14, an x86_64 TCG fixture
-configured with 512 MiB reported an unchanged MemTotal of 504016 KiB throughout
-both cycles. Each cycle allocated/touched 463470592 bytes, preserved the live
-page patterns and fresh-page zeroing, and released 450887680 bytes of QEMU RSS
-after freeing. This checks the soft-reclaim mechanism in the synthetic guest;
-the automatic-reclaim-disabled control completed the same guest workload but
-was correctly rejected with zero RSS reclaimed in the first round.
-This is not a VFIO, PVE or desktop workload result. Raw build/test captures and
-matching disposable binaries are removed after analysis.
+With the locked QEMU 11/Linux 6.18 sources and LLVM 19, a 512 MiB TCG guest
+completed two allocate/check/free/reuse cycles. Each allocation touched
+463470592 bytes. The two-CPU run with `init_on_alloc=1 init_on_free=1` kept
+MemTotal at 504164 KiB and released 455081984 and 455077888 bytes of QEMU RSS.
+Protocol/status checks passed; hard ballooning and migration were rejected.
+The one-CPU automatic-reclaim-disabled control completed both guest cycles
+but correctly failed physical-reclaim validation with zero RSS drop.
+These results establish neither PVE integration nor VFIO/GPU safety.
 
-## Required before PVE integration
+## Remaining production work
 
-The upstream research trees are based on QEMU 8.2 and Linux 6.1. They are not
-drop-in replacements for current Proxmox QEMU or a desktop distribution kernel.
-Port the allocator/device and DMA coordination to supported versions, retain
-PVE's required QMP interfaces, and make backend capability checks fail closed.
-Keep the existing hotplug path available and the two backends mutually exclusive.
-Verify guest feature negotiation before enabling reclamation. Keep configured
-capacity, guest-visible capacity, policy targets and resident physical memory
-distinct in status/QMP handling. Reusing PVE scheduling must not silently turn
-soft reclaim into the research device's hard-balloon operation. Preserve
-VFIO discard guards and coordinate DMA unmap/populate before releasing or
-reusing pages; globally bypassing the discard restriction is not a solution.
+1. Complete and validate DMA discard/populate coordination before relaxing the
+   native VFIO exclusion; exercise repeated reclaim/reuse with real devices.
+2. Port onto the matching Proxmox QEMU patch series and retain required PVE QMP
+   interfaces. A vanilla QEMU build is not a replacement PVE package.
+3. Add a mutually exclusive, capability-checked PVE backend. Translate native
+   policy targets into soft pressure/reclamation requests without a hard cap,
+   changing MemTotal or fabricating allocated-memory statistics. Preserve the
+   native scheduler and distinguish policy budget, guest capacity and residency.
+4. Validate desktop kernel features, reset/teardown, guest memory pressure,
+   multi-VM redistribution and representative GPU data integrity. Migration,
+   snapshots, hugepages, DIMM hotplug, virtio-fs and SEV/TDX need separate work.
 
-The isolated TCG test cannot validate VFIO DMA safety, GPU/CUDA workloads,
-multiple-VM redistribution, current PVE compatibility, migration or production
-stability. Those remain required acceptance gates. No controller, cron job or
-early-boot patch service is introduced; physical-page handling belongs in the
-QEMU/guest mechanism and PVE retains VM management and host allocation policy.
+No GUI switch or production claim should precede these gates. No external
+controller, cron job or early-boot patch service is introduced.

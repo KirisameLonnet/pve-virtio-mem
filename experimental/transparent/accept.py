@@ -9,9 +9,66 @@ import json
 import os
 from pathlib import Path
 import selectors
+import socket
 import subprocess
 import tempfile
 import time
+
+
+class Monitor:
+    """QMP for this newly created, isolated process only."""
+
+    def __init__(self, path, process):
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.settimeout(10)
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                self.socket.connect(str(path))
+                break
+            except (FileNotFoundError, ConnectionRefusedError):
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    self.socket.close()
+                    raise RuntimeError('Isolated QMP monitor did not start')
+                time.sleep(0.05)
+        self.stream = self.socket.makefile('rwb')
+        if 'QMP' not in json.loads(self.stream.readline()):
+            self.close()
+            raise RuntimeError('Invalid isolated QMP greeting')
+        self.sequence = 0
+        self.command('qmp_capabilities')
+
+    def close(self):
+        self.stream.close()
+        self.socket.close()
+
+    def command(self, execute, arguments=None, rejection=None):
+        self.sequence += 1
+        request = {'execute': execute, 'id': self.sequence}
+        if arguments is not None:
+            request['arguments'] = arguments
+        self.stream.write(json.dumps(request).encode() + b'\n')
+        self.stream.flush()
+        while True:
+            response = json.loads(self.stream.readline())
+            if response.get('id') == self.sequence:
+                break
+        if rejection is not None:
+            if rejection not in response.get('error', {}).get('desc', ''):
+                raise RuntimeError(f'{execute} did not reject the unsupported operation')
+            return None
+        if 'error' in response:
+            raise RuntimeError(f'{execute} failed: {response["error"]}')
+        return response['return']
+
+    def status(self, memory_mib, ready):
+        info = self.command('query-llfree-balloon')
+        capacity = memory_mib << 20
+        if (info.get('configured') != capacity or info.get('protocol-version') != 2 or
+                info.get('guest-ready') is not ready or
+                not 0 <= info.get('discarded-bytes', -1) <= capacity):
+            raise RuntimeError('Invalid transparent-memory status or shared ABI')
+        return info
 
 
 def rss_bytes(pid):
@@ -52,7 +109,7 @@ def validate(phases, samples, memory_mib):
     }
 
 
-def run(build, memory_mib, timeout, auto_reclaim=True):
+def run(build, memory_mib, timeout, auto_reclaim=True, cpus=1, hardened_init=False):
     device = {
         'driver': 'virtio-llfree-balloon-pci', 'auto-mode': auto_reclaim,
         'auto-mode-iothread': 'reclaim',
@@ -61,14 +118,17 @@ def run(build, memory_mib, timeout, auto_reclaim=True):
     with tempfile.TemporaryDirectory(prefix='accept-', dir=build) as scratch:
         log = Path(scratch) / 'guest.log'
         emulator_log = Path(scratch) / 'qemu.log'
+        qmp_path = Path(scratch) / 'qmp'
         command = [
             str(build / 'qemu-build/qemu-system-x86_64'),
-            '-machine', 'q35,accel=tcg', '-cpu', 'max', '-smp', '1',
-            '-m', str(memory_mib), '-nodefaults', '-no-reboot', '-display', 'none',
+            '-machine', 'q35,accel=tcg', '-cpu', 'max', '-smp', str(cpus),
+            '-m', str(memory_mib), '-nodefaults', '-no-reboot', '-display', 'none', '-S',
             '-serial', 'stdio', '-monitor', 'none',
+            '-qmp', f'unix:{qmp_path},server=on,wait=off',
             '-kernel', str(build / 'linux-build/arch/x86/boot/bzImage'),
             '-initrd', str(build / 'initramfs.gz'),
-            '-append', 'console=ttyS0 rdinit=/init panic=-1',
+            '-append', 'console=ttyS0 rdinit=/init panic=-1' +
+                       (' init_on_alloc=1 init_on_free=1' if hardened_init else ''),
             '-object', 'iothread,id=reclaim', '-object', 'iothread,id=install',
             '-device', json.dumps(device, separators=(',', ':')),
         ]
@@ -82,7 +142,15 @@ def run(build, memory_mib, timeout, auto_reclaim=True):
                 selector = selectors.DefaultSelector()
                 selector.register(process.stdout, selectors.EVENT_READ)
                 pending = b''
+                monitor = None
                 try:
+                    monitor = Monitor(qmp_path, process)
+                    monitor.status(memory_mib, False)
+                    monitor.command('llfree-balloon', {'value': memory_mib << 19},
+                                    rejection='Hard ballooning is disabled')
+                    monitor.command('migrate', {'uri': 'file:' + str(Path(scratch) / 'migration')},
+                                    rejection='shadow ABI migration is not implemented')
+                    monitor.command('cont')
                     while time.monotonic() - start < timeout:
                         if process.poll() is not None:
                             raise RuntimeError(f'QEMU exited with {process.returncode}')
@@ -103,12 +171,15 @@ def run(build, memory_mib, timeout, auto_reclaim=True):
                                     record = json.loads(line[len('TRANSPARENT '):])
                                     phase = record['phase']
                                     phases[phase] = record
+                                    monitor.status(memory_mib, True)
                                     print(json.dumps(record), flush=True)
                         if phase == 'pass':
                             break
                     else:
                         raise RuntimeError('Guest acceptance timed out')
                 finally:
+                    if monitor is not None:
+                        monitor.close()
                     selector.close()
                     process.terminate()
                     try:
@@ -131,6 +202,9 @@ if __name__ == '__main__':
     parser.add_argument('build', type=Path)
     parser.add_argument('--memory-mib', type=int, default=512)
     parser.add_argument('--timeout', type=int, default=300)
+    parser.add_argument('--cpus', type=int, choices=range(1, 5), default=1)
+    parser.add_argument('--hardened-init', action='store_true',
+                        help='Exercise native zero-on-allocation and zero-on-free hooks')
     parser.add_argument('--no-auto-reclaim', action='store_true',
                         help='Negative control: disable soft reclaim; reclaim validation should fail')
     args = parser.parse_args()
@@ -138,4 +212,5 @@ if __name__ == '__main__':
     build = args.build.resolve()
     if not build.is_relative_to(root) or not 256 <= args.memory_mib <= 2048:
         parser.error('Use a project-owned build and 256–2048 MiB test guest')
-    print(json.dumps(run(build, args.memory_mib, args.timeout, not args.no_auto_reclaim), indent=2))
+    print(json.dumps(run(build, args.memory_mib, args.timeout, not args.no_auto_reclaim,
+                         args.cpus, args.hardened_init), indent=2))

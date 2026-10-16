@@ -11,10 +11,13 @@ allocation up to that capacity when host resources permit, and automatic
 redistribution of idle physical pages without manual resize steps. The current
 virtio-mem backend implements hotplug and does not meet that target.
 
-Necessary QEMU and guest-kernel changes are in scope. The initial opt-in
-[HyperAlloc-based experiment](../experimental/transparent/README.md) pins
-matching sources and provides an isolated build/acceptance entry point. It
-does not replace the current production backend or establish VFIO acceptance.
+Necessary QEMU and guest-kernel changes are in scope. The opt-in
+[source port](../experimental/transparent/README.md) now targets QEMU 11 and
+Linux 6.18, retaining the native buddy allocator with a shared shadow bitmap.
+Its constant-capacity TCG reclaim/reuse test passes, including native
+allocation/free initialization. The VFIO exclusion remains active; DMA
+coordination, the Proxmox patch series and native soft-policy/statistics
+integration are unfinished. This does not replace the packaged backend.
 
 Acceptance must additionally show that another isolated VM can consume the
 released host RAM, that reallocating guest pages promptly restores safe CPU

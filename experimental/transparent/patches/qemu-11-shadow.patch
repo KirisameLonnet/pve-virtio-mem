@@ -1,0 +1,2386 @@
+diff --git a/hw/virtio/meson.build b/hw/virtio/meson.build
+index 415e359..10440ee 100644
+--- a/hw/virtio/meson.build
++++ b/hw/virtio/meson.build
+@@ -53,6 +53,10 @@ system_virtio_ss.add(when: 'CONFIG_VHOST_USER_VSOCK', if_true: files('vhost-user
+ system_virtio_ss.add(when: 'CONFIG_VIRTIO_RNG', if_true: files('virtio-rng.c'))
+ 
+ system_virtio_ss.add(when: 'CONFIG_VIRTIO_BALLOON', if_true: files('virtio-balloon.c'))
++if have_llfree
++  system_virtio_ss.add(when: 'CONFIG_VIRTIO_BALLOON', if_true: [files('virtio-llfree-balloon.c'), llfree_c_public_dep, llfree_qemu_inc_dep])
++endif
++
+ system_virtio_ss.add(when: 'CONFIG_VHOST_USER_FS', if_true: files('vhost-user-fs.c'))
+ system_virtio_ss.add(when: 'CONFIG_VIRTIO_PMEM', if_true: files('virtio-pmem.c'))
+ system_virtio_ss.add(when: 'CONFIG_VHOST_VSOCK', if_true: files('vhost-vsock.c'))
+@@ -76,6 +80,10 @@ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_INPUT', if_true: files('virtio-input-pci.
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_RNG', if_true: files('virtio-rng-pci.c'))
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_NSM', if_true: [files('virtio-nsm-pci.c', 'cbor-helpers.c'), libcbor])
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_BALLOON', if_true: files('virtio-balloon-pci.c'))
++if have_llfree
++  virtio_pci_ss.add(when: 'CONFIG_VIRTIO_BALLOON', if_true: files('virtio-llfree-balloon-pci.c'))
++endif
++
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_9P', if_true: files('virtio-9p-pci.c'))
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_SCSI', if_true: files('virtio-scsi-pci.c'))
+ virtio_pci_ss.add(when: 'CONFIG_VIRTIO_BLK', if_true: files('virtio-blk-pci.c'))
+diff --git a/hw/virtio/virtio-llfree-balloon-pci.c b/hw/virtio/virtio-llfree-balloon-pci.c
+new file mode 100644
+index 0000000..a801597
+--- /dev/null
++++ b/hw/virtio/virtio-llfree-balloon-pci.c
+@@ -0,0 +1,80 @@
++#include "qemu/osdep.h"
++
++#include "hw/virtio/virtio-pci.h"
++#include "hw/core/qdev-properties.h"
++#include "hw/virtio/virtio-llfree-balloon.h"
++#include "qapi/error.h"
++#include "qemu/module.h"
++#include "qom/object.h"
++
++typedef struct VirtIOLLFreeBalloonPCI VirtIOLLFreeBalloonPCI;
++
++/*
++ * virtio-llfree-balloon-pci: This extends VirtioPCIProxy.
++ */
++#define TYPE_VIRTIO_LLFREE_BALLOON_PCI "virtio-llfree-balloon-pci-base"
++DECLARE_INSTANCE_CHECKER(VirtIOLLFreeBalloonPCI, VIRTIO_LLFREE_BALLOON_PCI,
++			 TYPE_VIRTIO_LLFREE_BALLOON_PCI)
++
++struct VirtIOLLFreeBalloonPCI {
++	VirtIOPCIProxy parent_obj;
++	VirtIOLLFreeBalloon vdev;
++};
++
++// we need to explicitly decide how virtio notifications / kicks should be implemented
++// either via ioeventfd (true) => virtqueue will run in main event loop concurrently to vcpu
++// or synchronously in vcpu thread (false)
++// this has strong implications for the auto deflate mechanism and decides wheter we are single
++// or multi-threaded!
++static const Property virtio_llfree_balloon_properties[] = {
++	DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags, VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT,
++			true),
++};
++
++static void virtio_llfree_balloon_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
++{
++	VirtIOLLFreeBalloonPCI *dev = VIRTIO_LLFREE_BALLOON_PCI(vpci_dev);
++	DeviceState *vdev = DEVICE(&dev->vdev);
++
++	vpci_dev->class_code = PCI_CLASS_OTHERS;
++	qdev_realize(vdev, BUS(&vpci_dev->bus), errp);
++}
++
++static void virtio_llfree_balloon_pci_class_init(ObjectClass *klass, const void *data)
++{
++	DeviceClass *dc = DEVICE_CLASS(klass);
++	VirtioPCIClass *k = VIRTIO_PCI_CLASS(klass);
++	PCIDeviceClass *pcidev_k = PCI_DEVICE_CLASS(klass);
++	dc->hotpluggable = false;
++	k->realize = virtio_llfree_balloon_pci_realize;
++	set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++	pcidev_k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
++	pcidev_k->device_id = PCI_DEVICE_ID_VIRTIO_BALLOON;
++	pcidev_k->revision = VIRTIO_PCI_ABI_VERSION;
++	pcidev_k->class_id = PCI_CLASS_OTHERS;
++	device_class_set_props(dc, virtio_llfree_balloon_properties);
++}
++
++static void virtio_llfree_balloon_pci_instance_init(Object *obj)
++{
++	VirtIOLLFreeBalloonPCI *dev = VIRTIO_LLFREE_BALLOON_PCI(obj);
++
++	virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev), TYPE_VIRTIO_LLFREE_BALLOON);
++}
++
++static const VirtioPCIDeviceTypeInfo virtio_llfree_balloon_pci_info = {
++	.base_name = TYPE_VIRTIO_LLFREE_BALLOON_PCI,
++	.generic_name = "virtio-llfree-balloon-pci",
++	.transitional_name = "virtio-llfree-balloon-pci-transitional",
++	.non_transitional_name = "virtio-llfree-balloon-pci-non-transitional",
++	.instance_size = sizeof(VirtIOLLFreeBalloonPCI),
++	.instance_init = virtio_llfree_balloon_pci_instance_init,
++	.class_init = virtio_llfree_balloon_pci_class_init,
++};
++
++static void virtio_llfree_balloon_pci_register(void)
++{
++	virtio_pci_types_register(&virtio_llfree_balloon_pci_info);
++}
++
++type_init(virtio_llfree_balloon_pci_register)
+diff --git a/hw/virtio/virtio-llfree-balloon.c b/hw/virtio/virtio-llfree-balloon.c
+new file mode 100644
+index 0000000..906341a
+--- /dev/null
++++ b/hw/virtio/virtio-llfree-balloon.c
+@@ -0,0 +1,1331 @@
++#include "qemu/osdep.h"
++#include "qemu/main-loop.h"
++#include "qemu/iov.h"
++#include "qemu/module.h"
++#include "qemu/queue.h"
++#include "qemu/timer.h"
++#include "qemu/madvise.h"
++#include "qemu/error-report.h"
++#include "hw/virtio/virtio.h"
++#include "hw/virtio/virtio-bus.h"
++#include "hw/core/qdev-properties.h"
++#include "hw/core/boards.h"
++#include "hw/virtio/virtio-llfree-balloon.h"
++#include "llfree_platform.h"
++#include "subprojects/llfree-c/llc/src/utils.h"
++#include "system/llfree-balloon.h"
++#include "system/kvm.h"
++#include "system/address-spaces.h"
++#include "system/ramblock.h"
++#include "qapi/error.h"
++#include "migration/blocker.h"
++#include "trace.h"
++#include "standard-headers/linux/virtio_llfree_balloon.h"
++#include "standard-headers/linux/virtio_ids.h"
++#include "llfree.h"
++#include "llfree_zone.h"
++#include "llfree_states.h"
++#include <stdbool.h>
++#include <stdint.h>
++#include <linux/kvm.h>
++
++// For Testing
++// #define CONFIG_SIMULATE_BROKEN_VFIO 1
++// #define CONFIG_DEBUG 1
++
++#define LL_PAGE_SHIFT 12
++#define LL_PAGE_SIZE (1 << LL_PAGE_SHIFT)
++#define LL_HUGE_ORDER 9
++#define LL_HUGE_COUNT (1 << LL_HUGE_ORDER)
++#define LL_HUGE_SHIFT (LL_PAGE_SHIFT + LL_HUGE_ORDER)
++#define LL_HUGE_SIZE (1 << LL_HUGE_SHIFT)
++#define LL_RETRY_INTERVAL (5 * NANOSECONDS_PER_SECOND)
++#define LL_PAGECACHE_RETRIES 1
++#define LL_NUM_STATIC_QUEUES 2
++
++/*-----------------------------------------------------------------------------------------------
++| Shared Structs and Enums
++-------------------------------------------------------------------------------------------------*/
++typedef enum ll_notification {
++    PAGECACHE_DROPPED,
++} ll_notification_t;
++
++typedef struct ll_install_info {
++    uint32_t node;
++    uint32_t zone;
++    uint64_t frame;
++} ll_install_info_t;
++
++/// Static Memory Zone Preference Definitions.
++/// We exclude ZONE_DMA as it is already quite small.
++static const ll_zone_type_t zone_priority[] = {
++    LL_ZONE_NORMAL,
++    LL_ZONE_MOVABLE,
++    LL_ZONE_DMA32,
++};
++#define ZONE_PRIORITY_LEN (sizeof(zone_priority) / sizeof(*zone_priority))
++
++/*-----------------------------------------------------------------------------------------------
++| Helper Functions
++-------------------------------------------------------------------------------------------------*/
++static ram_addr_t get_current_ram_size(void)
++{
++    MachineState *machine = MACHINE(qdev_get_machine());
++    if (machine->device_memory) {
++        return machine->ram_size + machine->device_memory->dimm_size;
++    } else {
++        return machine->ram_size;
++    }
++}
++
++static uint32_t get_num_vcpus(void)
++{
++    MachineState *machine = MACHINE(qdev_get_machine());
++    return machine->smp.cpus;
++}
++
++typedef int (*aggregate_fn)(void *ctx, uint64_t frame, size_t len);
++typedef struct aggerage {
++    aggregate_fn fn;
++    void *ctx;
++    uint64_t frame;
++    size_t len;
++} aggregate_t;
++
++static aggregate_t aggregate_start(aggregate_fn fn, void *ctx)
++{
++    return (aggregate_t){
++        .fn = fn,
++        .ctx = ctx,
++        .frame = 0,
++        .len = 0,
++    };
++}
++
++static int aggregate_next(aggregate_t *self, uint64_t frame, size_t len)
++{
++    g_assert(len > 0);
++    // first range
++    if (self->len == 0) {
++        self->frame = frame;
++        self->len = len;
++        return 0;
++    }
++    // extend right
++    if (self->frame + self->len == frame) {
++        self->len += len;
++        return 0;
++    }
++    // extend left
++    if (frame + len == self->frame) {
++        self->frame = frame;
++        self->len += len;
++        return 0;
++    }
++    // not extendable
++    int ret = (self->fn)(self->ctx, self->frame, self->len);
++    self->frame = frame;
++    self->len = len;
++    return ret;
++}
++
++static int aggregate_finish(aggregate_t *self)
++{
++    if (self->len > 0)
++        return (self->fn)(self->ctx, self->frame, self->len);
++    return 0;
++}
++
++/*-----------------------------------------------------------------------------------------------
++| RamDiscardManager Functions,  Part 1
++| Bitmap Manipulation and explicit VFIO Notifications
++| Implementation is largely taken directly from virtio-mem
++-------------------------------------------------------------------------------------------------*/
++
++/*
++ * Adjust the memory section to cover the intersection with the given range.
++ *
++ * Returns false if the intersection is empty, otherwise returns true.
++ */
++static bool intersect_memory_section(MemoryRegionSection *s, uint64_t offset,
++                                     uint64_t size)
++{
++    uint64_t start = MAX(s->offset_within_region, offset);
++    uint64_t end =
++        MIN(s->offset_within_region + int128_get64(s->size), offset + size);
++
++    if (end <= start) {
++        return false;
++    }
++
++    s->offset_within_address_space += start - s->offset_within_region;
++    s->offset_within_region = start;
++    s->size = int128_make64(end - start);
++    return true;
++}
++
++static void notify_discard(VirtIOLLFreeBalloon *dev, uint64_t offset,
++                           uint64_t size)
++{
++    RamDiscardListener *rdl;
++
++#ifdef CONFIG_SIMULATE_BROKEN_VFIO
++    return;
++#endif
++
++    if (QLIST_EMPTY(&dev->rdl_list)) {
++        return;
++    }
++
++    bool found_intersection = false;
++    QLIST_FOREACH(rdl, &dev->rdl_list, next)
++    {
++        MemoryRegionSection tmp = *rdl->section;
++
++        if (!intersect_memory_section(&tmp, offset, size)) {
++            continue;
++        }
++        found_intersection = true;
++        rdl->notify_discard(rdl, &tmp);
++    }
++
++    // we always expect to find at least one match, as we are inflating
++    // RAM memory
++    g_assert(found_intersection == true);
++}
++
++static int notify_populate(VirtIOLLFreeBalloon *dev, uint64_t offset,
++                           uint64_t size)
++{
++    RamDiscardListener *rdl, *rdl2;
++    int ret = 0;
++
++#ifdef CONFIG_SIMULATE_BROKEN_VFIO
++    return 0;
++#endif
++
++    if (QLIST_EMPTY(&dev->rdl_list)) {
++        return 0;
++    }
++
++    bool found_intersection = false;
++    QLIST_FOREACH(rdl, &dev->rdl_list, next)
++    {
++        MemoryRegionSection tmp = *rdl->section;
++
++        if (!intersect_memory_section(&tmp, offset, size)) {
++            continue;
++        }
++        found_intersection = true;
++        ret = rdl->notify_populate(rdl, &tmp);
++        if (ret) {
++            break;
++        }
++    }
++
++    // we always expect to find at least one match, as we are inflating
++    // RAM memory
++    g_assert(found_intersection == true);
++
++    if (ret) {
++        /* Notify all already-notified listeners. */
++        QLIST_FOREACH(rdl2, &dev->rdl_list, next)
++        {
++            MemoryRegionSection tmp = *rdl2->section;
++
++            if (rdl2 == rdl) {
++                break;
++            }
++            if (!intersect_memory_section(&tmp, offset, size)) {
++                continue;
++            }
++            rdl2->notify_discard(rdl2, &tmp);
++        }
++    }
++    return ret;
++}
++
++/*-----------------------------------------------------------------------------------------------
++| LLFree-Balloon Inflation Operation Functions
++-------------------------------------------------------------------------------------------------*/
++static void unmap_range(VirtIOLLFreeBalloon *dev, hwaddr gpa, size_t size)
++{
++    g_assert(gpa > 0 && gpa > 0 && size % LL_HUGE_SIZE == 0);
++
++    MemoryRegionSection section =
++        memory_region_find(get_system_memory(), gpa, size);
++
++    // we registered as RamDiscardManager for the RAM memory region
++    // every section here should be part of this region and therefore we should
++    // see that the RamDiscardManager field has been set by us
++    g_assert(section.mr != NULL);
++
++    if (!memory_region_is_ram(section.mr) || memory_region_is_rom(section.mr) ||
++        memory_region_is_romd(section.mr)) {
++        g_assert(!"unmap: invalid section");
++    }
++
++    void *addr =
++        memory_region_get_ram_ptr(section.mr) + section.offset_within_region;
++    ram_addr_t rb_offset;
++    RAMBlock *rb = qemu_ram_block_from_host(addr, false, &rb_offset);
++    int ret = ram_block_discard_range(rb, rb_offset, size);
++    if (ret < 0)
++        g_assert(!"unmap: discard failed");
++
++    notify_discard(dev, section.offset_within_region, size);
++    memory_region_unref(section.mr);
++}
++
++struct ag_dev_zone {
++    VirtIOLLFreeBalloon *dev;
++    ll_zone_t *zone;
++};
++
++static int soft_reclaim_cb(void *ctx, uint64_t frame, size_t len)
++{
++    struct ag_dev_zone *data = ctx;
++    ll_reclaim_states_t *states = ll_zone_states(data->zone);
++    // Check if range is valid
++    for (size_t i = 0; i < len; i += LL_HUGE_COUNT) {
++        if (ll_reclaim_states_is_soft(states, frame + i)) {
++            error_report("range already unmapped %lx-%lx", frame, frame + len);
++            return -1;
++        }
++    }
++
++    hwaddr addr = (ll_zone_start_frame(data->zone) + frame) * LL_PAGE_SIZE;
++    unmap_range(data->dev, addr, len * LL_PAGE_SIZE);
++
++    for (size_t i = 0; i < len; i += LL_HUGE_COUNT) {
++        if (!ll_frame_states_soft_reclaim(states, frame + i)) {
++            error_report("invalid frame state");
++            return -1;
++        }
++    }
++    qatomic_add(&data->dev->reclaimed_huge, len / LL_HUGE_COUNT);
++    return 0;
++}
++
++static int32_t ll_auto_soft_reclaim(VirtIOLLFreeBalloon *dev)
++{
++    size_t unmapped_huge = 0;
++
++    for (size_t node = 0; node < ll_nodes_len(dev->nodes); node++) {
++        for (size_t i = 0; i < ZONE_PRIORITY_LEN; i++) {
++            ll_zone_type_t zid = zone_priority[i];
++            ll_zone_t *zone = ll_nodes_get_zone(dev->nodes, node, zid);
++            if (zone == NULL)
++                continue;
++
++            // allocate a chunk of frames, inflate them, and repeat until nomem
++            while (true) {
++                ll_zone_lock(zone);
++
++                // aggregate syscalls
++                struct ag_dev_zone data = {.dev = dev, .zone = zone};
++                aggregate_t ag = aggregate_start(soft_reclaim_cb, &data);
++
++                // find inflatable frames
++                bool nomem = false;
++                for (size_t i = 0; i < LLFREE_TREE_CHILDREN; i++) {
++                    llfree_result_t res = ll_zone_reclaim(zone, false);
++                    if (!llfree_is_ok(res)) {
++                        if (res.error != LLFREE_ERR_MEMORY)
++                            error_report("llfree unmap failed");
++                        nomem = true;
++                        break;
++                    }
++                    aggregate_next(&ag, res.frame, LL_HUGE_COUNT);
++                    unmapped_huge += 1;
++                }
++                aggregate_finish(&ag);
++
++                ll_zone_unlock(zone);
++
++                if (nomem) {
++                    break; // we were unable to allocate enough frames
++                }
++
++                // let others run
++                sched_yield();
++            }
++        }
++    }
++    if (unmapped_huge > 0) {
++        info_report("Auto unmap: %zu huge pages", unmapped_huge);
++    }
++
++    return unmapped_huge;
++}
++
++/*-----------------------------------------------------------------------------------------------
++| LLFree-Balloon Deflation Operation Functions
++-------------------------------------------------------------------------------------------------*/
++static int map_range(VirtIOLLFreeBalloon *dev, hwaddr gpa, uint64_t size)
++{
++    // find QEMUs matching memory section
++    MemoryRegionSection section =
++        memory_region_find(get_system_memory(), gpa, size);
++
++    // we registered as RamDiscardManager for the RAM memory region
++    // every section here should be part of this region and therefore we should
++    // see that the RamDiscardManager field has been set by us
++    if (section.mr == NULL)
++        g_assert(!"map: invalid section");
++
++    if (!memory_region_is_ram(section.mr) || memory_region_is_rom(section.mr) ||
++        memory_region_is_romd(section.mr))
++        g_assert(!"map: invalid section");
++
++    // Allocating host physical memory, in case of VFIO
++    // additionally create IOMMU mapping
++    void *addr =
++        memory_region_get_ram_ptr(section.mr) + section.offset_within_region;
++    void *host_addr = addr;
++
++    if (virtio_has_feature(dev->host_features, LL_BALLOON_F_VFIO)) {
++        int ret = notify_populate(dev, section.offset_within_region, size);
++        if (ret) {
++            memory_region_unref(section.mr);
++            return ret;
++        }
++    }
++
++    int ret = qemu_madvise(host_addr, size, MADV_POPULATE_WRITE);
++    if (ret != 0)
++        error_report("madvise failed with %d", ret);
++    memory_region_unref(section.mr);
++    return ret;
++}
++
++/*-----------------------------------------------------------------------------------------------
++| (Automatic) Scheduling Functions
++-------------------------------------------------------------------------------------------------*/
++
++static void ll_schedule_auto_reclaim(VirtIOLLFreeBalloon *dev)
++{
++    timer_mod(dev->auto_mode_timer,
++              qemu_clock_get_ns(QEMU_CLOCK_HOST) + LL_RETRY_INTERVAL);
++}
++
++static void ll_balloon_auto_reclaim(void *opaque)
++{
++    BQL_LOCK_GUARD();
++    VirtIOLLFreeBalloon *dev = opaque;
++
++    ll_auto_soft_reclaim(dev);
++
++    // and repeat with configured time interval
++    ll_schedule_auto_reclaim(dev);
++}
++
++/*-----------------------------------------------------------------------------------------------
++| VirtQueue Handler Functions
++-------------------------------------------------------------------------------------------------*/
++
++// scheduled in main event loop
++static void handle_llfree_zone_info(VirtIODevice *vdev, VirtQueue *vq)
++{
++    BQL_LOCK_GUARD();
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    if (!virtio_has_feature(vdev->guest_features, LL_BALLOON_F_SHARED_ABI)) {
++        virtio_error(vdev, "unnegotiated shared ABI request");
++        return;
++    }
++
++    VirtQueueElement *elem = virtqueue_pop(vq, sizeof(VirtQueueElement));
++    if (!elem) {
++        warn_report("%s: No element in queue (null pointer)", __func__);
++        return;
++    }
++
++    void *buffer = g_malloc(ll_zone_buffer_size());
++    if (iov_to_buf(elem->out_sg, elem->out_num, 0, buffer, ll_zone_buffer_size()) !=
++        ll_zone_buffer_size() || !ll_nodes_add_zone(dev->nodes, buffer)) {
++        virtio_error(vdev, "invalid or duplicate shadow zone descriptor");
++        virtqueue_detach_element(vq, elem, 0);
++        g_free(buffer);
++        g_free(elem);
++        return;
++    }
++    g_free(buffer);
++
++    virtqueue_push(vq, elem, 0);
++    virtio_notify(vdev, vq);
++    g_free(elem);
++    return;
++}
++
++struct install_range_ctx {
++    VirtIOLLFreeBalloon *dev;
++    ll_zone_t *zone;
++};
++
++static int install_range_cb(void *ctx, uint64_t frame, size_t len)
++{
++    struct install_range_ctx *data = ctx;
++    g_assert(frame % LL_HUGE_COUNT == 0);
++    g_assert(frame < ll_zone_frames(data->zone));
++
++    hwaddr gpa_addr = (ll_zone_start_frame(data->zone) + frame) * LL_PAGE_SIZE;
++    if (map_range(data->dev, gpa_addr, len * LL_PAGE_SIZE))
++        return -1;
++
++    // Update llfree state
++    for (size_t i = 0; i < len; i += LL_HUGE_COUNT) {
++        llfree_result_t res = ll_zone_install(data->zone, frame + i);
++        if (!llfree_is_ok(res)) {
++            error_report("Failed install %ld", frame + i);
++            return -1;
++        }
++    }
++    return 0;
++}
++
++// Handle request from guest to populate the given memory range
++static void handle_install_request(VirtIODevice *vdev, VirtQueue *vq)
++{
++    BQL_LOCK_GUARD();
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    if (!virtio_has_feature(vdev->guest_features, LL_BALLOON_F_SHARED_ABI)) {
++        virtio_error(vdev, "unnegotiated shared ABI request");
++        return;
++    }
++
++    VirtQueueElement *elem = virtqueue_pop(vq, sizeof(VirtQueueElement));
++    if (!elem)
++        return;
++
++    ll_install_info_t info;
++    if (iov_to_buf(elem->out_sg, elem->out_num, 0, &info, sizeof(info)) != sizeof(info)) {
++        virtio_error(vdev, "short shadow install descriptor");
++        virtqueue_detach_element(vq, elem, 0); g_free(elem); return;
++    }
++
++    // calculate corresponding huge frame
++    uint64_t huge_frame = align_down(info.frame, LL_HUGE_COUNT);
++    ll_zone_t *zone = ll_nodes_get_zone(dev->nodes, info.node, info.zone);
++
++    if (!zone || info.frame >= ll_zone_frames(zone) ||
++        huge_frame + LL_HUGE_COUNT > ll_zone_frames(zone)) {
++        virtio_error(vdev, "invalid shadow install range");
++        virtqueue_detach_element(vq, elem, 0); g_free(elem); return;
++    }
++    ll_zone_lock(zone);
++
++    // already populated
++    if (!ll_zone_is_evicted(zone, huge_frame)) {
++        // check host state
++        g_assert(
++            ll_reclaim_states_is_installed(ll_zone_states(zone), huge_frame));
++        goto finish;
++    }
++
++    // check host state
++    g_assert(ll_reclaim_states_is_soft(ll_zone_states(zone), huge_frame));
++
++    struct install_range_ctx ctx = {.zone = zone, .dev = dev};
++
++#if 0
++    // deflate whole tree
++    aggregate_t ag = aggregate_start(install_range_cb, &ctx);
++    uint64_t tree_offset = align_down(huge_frame, LLFREE_TREE_SIZE);
++    for (size_t child = 0; child < LLFREE_TREE_CHILDREN; child++) {
++        uint64_t frame = tree_offset + child * LLFREE_CHILD_SIZE;
++        if (ll_frame_states_install(ll_zone_states(zone), frame)) {
++            aggregate_next(&ag, frame, LL_HUGE_COUNT);
++        }
++    }
++    aggregate_finish(&ag);
++#else
++    if (install_range_cb(&ctx, huge_frame, LL_HUGE_COUNT)) {
++        virtio_error(vdev, "shadow backing population failed");
++        ll_zone_unlock(zone);
++        virtqueue_detach_element(vq, elem, 0);
++        g_free(elem);
++        return;
++    }
++    g_assert(ll_frame_states_install(ll_zone_states(zone), huge_frame));
++    qatomic_sub(&dev->reclaimed_huge, 1);
++#endif
++
++finish:
++    ll_zone_unlock(zone);
++
++    virtqueue_push(vq, elem, 0);
++    virtio_notify(vdev, vq);
++    g_free(elem);
++}
++
++// scheduled in main event loop
++static void handle_update_request(VirtIODevice *vdev, VirtQueue *vq)
++{
++    BQL_LOCK_GUARD();
++    if (!virtio_has_feature(vdev->guest_features, LL_BALLOON_F_SHARED_ABI)) {
++        virtio_error(vdev, "unnegotiated shared ABI request");
++        return;
++    }
++
++    VirtQueueElement *elem = virtqueue_pop(vq, sizeof(VirtQueueElement));
++    if (!elem) {
++        warn_report("No element in llfree_request_vq (null pointer) \n");
++        return;
++    }
++
++    ll_notification_t guest_req;
++    if (iov_to_buf(elem->out_sg, elem->out_num, 0, &guest_req, sizeof(guest_req)) != sizeof(guest_req)) {
++        virtio_error(vdev, "short shadow notification");
++        virtqueue_detach_element(vq, elem, 0); g_free(elem); return;
++    }
++    virtqueue_push(vq, elem, 0);
++    virtio_notify(vdev, vq);
++    g_free(elem);
++
++    switch (guest_req) {
++    case PAGECACHE_DROPPED:
++        /* No hard balloon adjustment in the native buddy shadow ABI. */
++        break;
++    default:
++        break;
++    }
++}
++
++/*-----------------------------------------------------------------------------------------------
++| RamDiscardManager Functions,  Part 2
++| Implementation is largely taken directly from virtio-mem
++-------------------------------------------------------------------------------------------------*/
++
++typedef int (*ll_wrapper_cb)(MemoryRegionSection *s, void *opaque);
++
++struct ll_wrapper_data {
++    size_t start_frame;
++    MemoryRegionSection *section;
++    ll_wrapper_cb cb;
++    void *opaque;
++};
++static int ll_section_wrapper(void *ctx, uint64_t frame, size_t len)
++{
++    struct ll_wrapper_data *data = ctx;
++    MemoryRegionSection tmp = *data->section;
++    hwaddr offset = (data->start_frame + frame) * LL_PAGE_SIZE;
++    size_t size = len * LL_PAGE_SIZE;
++
++    if (intersect_memory_section(&tmp, offset, size)) {
++        int ret = (data->cb)(&tmp, data->opaque);
++        if (ret < 0)
++            error_report("rdl notify failed %lx-%lx", offset, offset + size);
++        return ret;
++    }
++    return 0;
++}
++
++static int ll_for_each_section(const VirtIOLLFreeBalloon *dev,
++                               MemoryRegionSection *s, ll_wrapper_cb cb,
++                               void *opaque, bool installed)
++{
++    if (ll_nodes_len(dev->nodes) == 0) {
++        // Not initialized: just map all!
++        struct ll_wrapper_data ctx = {
++            .start_frame = s->offset_within_address_space / LL_PAGE_SIZE,
++            .section = s,
++            .cb = cb,
++            .opaque = opaque,
++        };
++        return ll_section_wrapper(&ctx, 0, int128_get64(s->size));
++    }
++
++    for (size_t node = 0; node < ll_nodes_len(dev->nodes); node++) {
++        for (ll_zone_type_t zid = 0; zid < LL_ZONE_LEN; zid++) {
++            ll_zone_t *zone = ll_nodes_get_zone(dev->nodes, node, zid);
++            if (zone == NULL)
++                continue;
++            ll_zone_lock(zone);
++
++            struct ll_wrapper_data ctx = {
++                .start_frame = ll_zone_start_frame(zone),
++                .section = s,
++                .cb = cb,
++                .opaque = opaque,
++            };
++            aggregate_t ag = aggregate_start(ll_section_wrapper, &ctx);
++            for (size_t f = 0; f < ll_zone_frames(zone); f += LL_HUGE_COUNT) {
++                if (ll_reclaim_states_is_installed(ll_zone_states(zone), f) ==
++                    installed) {
++
++                    int ret = aggregate_next(&ag, f, LL_HUGE_COUNT);
++                    if (ret < 0) {
++                        ll_zone_unlock(zone);
++                        return ret;
++                    }
++                }
++            }
++            int ret = aggregate_finish(&ag);
++
++            ll_zone_unlock(zone);
++            return ret;
++        }
++    }
++    return 0;
++}
++
++static uint64_t ll_rdm_get_min_granularity(const RamDiscardManager *rdm,
++                                           const MemoryRegion *mr)
++{
++    return LL_HUGE_SIZE;
++}
++
++static bool ll_rdm_is_populated(const RamDiscardManager *rdm,
++                                const MemoryRegionSection *s)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(rdm);
++    uint64_t start = s->offset_within_region / LL_PAGE_SIZE;
++    uint64_t end = DIV_ROUND_UP(s->offset_within_region + int128_get64(s->size),
++                                LL_PAGE_SIZE);
++    uint64_t len = end - start;
++
++    for (size_t node = 0; node < ll_nodes_len(dev->nodes); node++) {
++        for (ll_zone_type_t zid = 0; zid < LL_ZONE_LEN; zid++) {
++            ll_zone_t *zone = ll_nodes_get_zone(dev->nodes, node, zid);
++            if (zone == NULL)
++                continue;
++            if (ll_zone_start_frame(zone) <= start &&
++                len <= ll_zone_frames(zone)) {
++                ll_reclaim_states_t *states = ll_zone_states(zone);
++                for (size_t i = 0; i < len; i++)
++                    if (!ll_reclaim_states_is_installed(states, start + i))
++                        return false;
++                return true;
++            }
++        }
++    }
++    error_report("Zone not found for region %lu", start);
++    return false;
++}
++
++static int ll_rdm_replay_populated(const RamDiscardManager *rdm,
++                                   MemoryRegionSection *section,
++                                   ReplayRamDiscardState replay_fn, void *opaque)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(rdm);
++    return ll_for_each_section(dev, section, replay_fn, opaque, true);
++}
++
++struct replay_discard_data {
++    ReplayRamDiscardState replay_fn;
++    void *opaque;
++};
++static int ll_replay_discard_cb(MemoryRegionSection *section, void *opaque)
++{
++    struct replay_discard_data *data = opaque;
++    return (data->replay_fn)(section, data->opaque);
++}
++static int ll_rdm_replay_discarded(const RamDiscardManager *rdm,
++                                    MemoryRegionSection *section,
++                                    ReplayRamDiscardState replay_fn, void *opaque)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(rdm);
++    struct replay_discard_data data = {.replay_fn = replay_fn,
++                                       .opaque = opaque};
++    return ll_for_each_section(dev, section, ll_replay_discard_cb, &data, false);
++}
++
++struct ll_notify_populate_data {
++    NotifyRamPopulate cb;
++    RamDiscardListener *rdl;
++};
++static int ll_notify_populate_cb(MemoryRegionSection *s, void *opaque)
++{
++    struct ll_notify_populate_data *data = opaque;
++    int ret = (data->cb)(data->rdl, s);
++    if (ret < 0)
++        error_report("rdl notify failed %lx-%lx",
++                     s->offset_within_address_space,
++                     s->offset_within_address_space + int128_get64(s->size));
++    return ret;
++}
++static void ll_rdm_register_listener(RamDiscardManager *rdm,
++                                     RamDiscardListener *rdl,
++                                     MemoryRegionSection *s)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(rdm);
++
++    rdl->section = memory_region_section_new_copy(s);
++
++    QLIST_INSERT_HEAD(&dev->rdl_list, rdl, next);
++    struct ll_notify_populate_data data = {
++        .cb = rdl->notify_populate,
++        .rdl = rdl,
++    };
++    int ret = ll_for_each_section(dev, rdl->section, ll_notify_populate_cb,
++                                  &data, true);
++    if (ret < 0) {
++        error_report("%s: Replaying non inflated ranges failed: %s", __func__,
++                     strerror(-ret));
++    }
++
++    virtio_add_feature((uint64_t *)&dev->host_features, LL_BALLOON_F_VFIO);
++}
++
++struct ll_notify_discard_data {
++    NotifyRamDiscard cb;
++    RamDiscardListener *rdl;
++};
++static int ll_notify_discard_cb(MemoryRegionSection *s, void *opaque)
++{
++    struct ll_notify_discard_data *data = opaque;
++    (data->cb)(data->rdl, s);
++    return 0;
++}
++static void ll_rdm_unregister_listener(RamDiscardManager *rdm,
++                                       RamDiscardListener *rdl)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(rdm);
++
++    struct ll_notify_discard_data data = {
++        .cb = rdl->notify_discard,
++        .rdl = rdl,
++    };
++    ll_for_each_section(dev, rdl->section, ll_notify_discard_cb, &data, true);
++
++    memory_region_section_free_copy(rdl->section);
++    rdl->section = NULL;
++    QLIST_REMOVE(rdl, next);
++
++    if (QLIST_EMPTY(&dev->rdl_list))
++        virtio_clear_feature((uint64_t *)&dev->host_features,
++                             LL_BALLOON_F_VFIO);
++}
++
++/*-----------------------------------------------------------------------------------------------
++| Functions for managing iothread pool backend for multi-threaded auto-deflate
++| taken from virtio-blk.c, slightly modified
++-------------------------------------------------------------------------------------------------*/
++static void balloon_ioeventfd_attach(VirtIOLLFreeBalloon *dev)
++{
++    VirtIODevice *vdev = VIRTIO_DEVICE(dev);
++
++    for (uint16_t i = 0; i < dev->num_queues; i++) {
++        VirtQueue *vq = virtio_get_queue(vdev, i);
++        virtio_queue_aio_attach_host_notifier(vq, dev->vq_aio_context[i]);
++    }
++}
++
++/* Context: BQL held */
++static void balloon_stop_ioeventfd(VirtIODevice *vdev)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    BusState *qbus = qdev_get_parent_bus(DEVICE(dev));
++    unsigned i;
++    unsigned nvqs = dev->num_queues;
++
++    /*
++     * Batch all the host notifiers in a single transaction to avoid
++     * quadratic time complexity in address_space_update_ioeventfds().
++     */
++    memory_region_transaction_begin();
++
++    for (i = 0; i < nvqs; i++) {
++        virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, false);
++    }
++
++    /*
++     * The transaction expects the ioeventfds to be open when it
++     * commits. Do it now, before the cleanup loop.
++     */
++    memory_region_transaction_commit();
++
++    for (i = 0; i < nvqs; i++) {
++        virtio_bus_cleanup_host_notifier(VIRTIO_BUS(qbus), i);
++    }
++}
++
++/* Context: BQL held */
++static int balloon_start_ioeventfd(VirtIODevice *vdev)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    BusState *qbus = BUS(qdev_get_parent_bus(DEVICE(dev)));
++    unsigned i;
++    unsigned nvqs = dev->num_queues;
++    int r;
++
++    /*
++     * Batch all the host notifiers in a single transaction to avoid
++     * quadratic time complexity in address_space_update_ioeventfds().
++     */
++    memory_region_transaction_begin();
++
++    /* Set up virtqueue notify */
++    for (i = 0; i < nvqs; i++) {
++        r = virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, true);
++        if (r != 0) {
++            int j = i;
++
++            fprintf(stderr, "virtio-blk failed to set host notifier (%d)\n", r);
++            while (i--) {
++                virtio_bus_set_host_notifier(VIRTIO_BUS(qbus), i, false);
++            }
++
++            /*
++             * The transaction expects the ioeventfds to be open when it
++             * commits. Do it now, before the cleanup loop.
++             */
++            memory_region_transaction_commit();
++
++            while (j--) {
++                virtio_bus_cleanup_host_notifier(VIRTIO_BUS(qbus), j);
++            }
++            goto fail_host_notifiers;
++        }
++    }
++
++    memory_region_transaction_commit();
++
++    /*
++     * Attach our iothreads
++     */
++    balloon_ioeventfd_attach(dev);
++    return 0;
++
++fail_host_notifiers:
++    return -ENOSYS;
++}
++
++static bool
++validate_iothread_vq_mapping_list(IOThreadVirtQueueMappingList *list,
++                                  uint16_t num_queues, Error **errp)
++{
++    g_autofree unsigned long *vqs = bitmap_new(num_queues);
++    g_autoptr(GHashTable) iothreads = g_hash_table_new(g_str_hash, g_str_equal);
++
++    for (IOThreadVirtQueueMappingList *node = list; node; node = node->next) {
++        const char *name = node->value->iothread;
++        uint16List *vq;
++
++        if (!iothread_by_id(name)) {
++            error_setg(errp, "IOThread \"%s\" object does not exist", name);
++            return false;
++        }
++
++        if (!g_hash_table_add(iothreads, (gpointer)name)) {
++            error_setg(errp,
++                       "duplicate IOThread name \"%s\" in iothread-vq-mapping",
++                       name);
++            return false;
++        }
++
++        if (node != list) {
++            if (!!node->value->vqs != !!list->value->vqs) {
++                error_setg(errp, "either all items in iothread-vq-mapping "
++                                 "must have vqs or none of them must have it");
++                return false;
++            }
++        }
++
++        for (vq = node->value->vqs; vq; vq = vq->next) {
++            if (vq->value >= num_queues) {
++                error_setg(errp,
++                           "vq index %u for IOThread \"%s\" must be "
++                           "less than num_queues %u in iothread-vq-mapping",
++                           vq->value, name, num_queues);
++                return false;
++            }
++
++            if (test_and_set_bit(vq->value, vqs)) {
++                error_setg(errp,
++                           "cannot assign vq %u to IOThread \"%s\" "
++                           "because it is already assigned",
++                           vq->value, name);
++                return false;
++            }
++        }
++    }
++
++    if (list->value->vqs) {
++        for (uint16_t i = 0; i < num_queues; i++) {
++            if (!test_bit(i, vqs)) {
++                error_setg(
++                    errp,
++                    "missing vq %u IOThread assignment in iothread-vq-mapping",
++                    i);
++                return false;
++            }
++        }
++    }
++
++    return true;
++}
++
++/**
++ * apply_iothread_vq_mapping:
++ * @iothread_vq_mapping_list: The mapping of virtqueues to IOThreads.
++ * @vq_aio_context: The array of AioContext pointers to fill in.
++ * @num_queues: The length of @vq_aio_context.
++ * @errp: If an error occurs, a pointer to the area to store the error.
++ *
++ * Fill in the AioContext for each virtqueue in the @vq_aio_context array given
++ * the iothread-vq-mapping parameter in @iothread_vq_mapping_list.
++ *
++ * Returns: %true on success, %false on failure.
++ **/
++static bool
++apply_iothread_vq_mapping(IOThreadVirtQueueMappingList *iothread_vq_mapping,
++                          AioContext **vq_aio_context, uint16_t num_queues,
++                          Error **errp)
++{
++    IOThreadVirtQueueMappingList *node;
++    size_t num_iothreads = 0;
++
++    if (!validate_iothread_vq_mapping_list(iothread_vq_mapping, num_queues,
++                                           errp)) {
++        return false;
++    }
++
++    for (node = iothread_vq_mapping; node; node = node->next) {
++        num_iothreads++;
++    }
++
++    AioContext *main_loop_ctx = qemu_get_aio_context();
++    for (uint32_t i = 0; i < LL_NUM_STATIC_QUEUES; i++) {
++        vq_aio_context[i] = main_loop_ctx;
++    }
++
++    size_t cur_iothread = LL_NUM_STATIC_QUEUES;
++    for (node = iothread_vq_mapping; node; node = node->next) {
++        IOThread *iothread = iothread_by_id(node->value->iothread);
++        AioContext *ctx = iothread_get_aio_context(iothread);
++
++        /* Released in virtio_blk_vq_aio_context_cleanup() */
++        object_ref(OBJECT(iothread));
++
++        if (node->value->vqs) {
++            /* Explicit vq:IOThread assignment */
++            for (uint16List *vq = node->value->vqs; vq; vq = vq->next) {
++                g_assert(vq->value < num_queues);
++                vq_aio_context[vq->value] = ctx;
++            }
++        } else {
++            /* Round-robin vq:IOThread assignment */
++            for (size_t i = cur_iothread; i < num_queues; i += num_iothreads) {
++                vq_aio_context[i] = ctx;
++            }
++        }
++
++        cur_iothread++;
++    }
++
++    return true;
++}
++
++/*-----------------------------------------------------------------------------------------------
++| Virtio Device Management Functions
++-------------------------------------------------------------------------------------------------*/
++static void ll_balloon_get_config(VirtIODevice *vdev, uint8_t *config_data)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    struct ll_balloon_config config = {};
++    config.magic = cpu_to_le32(LL_BALLOON_ABI_MAGIC);
++    config.version = cpu_to_le32(LL_BALLOON_ABI_VERSION);
++    config.shrink_pagecache = cpu_to_le32(dev->shrink_pagecache);
++    memcpy(config_data, &config, sizeof(struct ll_balloon_config));
++    return;
++}
++
++static void ll_balloon_set_config(VirtIODevice *vdev,
++                                  const uint8_t *config_data)
++{
++    /* Configuration is host-owned; guest writes cannot request reclaim. */
++
++}
++
++static void ll_balloon_stat(void *opaque, LLfreeBalloonInfo *info)
++{
++    VirtIOLLFreeBalloon *dev = opaque;
++    info->configured = get_current_ram_size();
++    info->discarded_bytes = qatomic_read(&dev->reclaimed_huge) << LL_HUGE_SHIFT;
++    info->protocol_version = LL_BALLOON_ABI_VERSION;
++    info->guest_ready = ll_nodes_len(dev->nodes) > 0;
++    return;
++}
++
++static void ll_init_vqs(VirtIODevice *vdev, VirtIOLLFreeBalloon *dev)
++{
++    dev->llfree_info_vq = virtio_add_queue(vdev, 128, handle_llfree_zone_info);
++    dev->llfree_request_vq = virtio_add_queue(vdev, 128, handle_update_request);
++
++    // add one auto-deflate virtqueue per vcpu
++    dev->llfree_auto_deflate_vqs = g_new(VirtQueue *, get_num_vcpus());
++    for (uint32_t i = 0; i < get_num_vcpus(); i++) {
++        dev->llfree_auto_deflate_vqs[i] =
++            virtio_add_queue(vdev, 1, handle_install_request);
++    }
++
++    dev->num_queues = LL_NUM_STATIC_QUEUES + get_num_vcpus();
++}
++
++static bool ll_init_iothread_mapping(VirtIOLLFreeBalloon *dev, Error **errp)
++{
++    if (dev->num_queues == 0) {
++        error_setg(errp, "number of queues can't be zero");
++        return false;
++    }
++
++    dev->vq_aio_context = g_new(AioContext *, dev->num_queues);
++
++    // start with default and map every virtqueue
++    // to the main event loop
++    AioContext *ctx = qemu_get_aio_context();
++    for (unsigned i = 0; i < dev->num_queues; i++) {
++        dev->vq_aio_context[i] = ctx;
++    }
++
++    // and if we have iothreads, then remap virtqueues
++    // round robin onto the iothreads
++    if (!dev->iothread_vq_mapping_list) {
++        return false;
++    }
++
++    bool success =
++        apply_iothread_vq_mapping(dev->iothread_vq_mapping_list,
++                                  dev->vq_aio_context, dev->num_queues, errp);
++    if (!success) {
++        g_free(dev->vq_aio_context);
++        dev->vq_aio_context = NULL;
++    }
++    return success;
++}
++
++// initialization and destruction
++static void ll_balloon_device_realize(DeviceState *dev_state, Error **errp)
++{
++    int ret;
++    VirtIODevice *vdev = VIRTIO_DEVICE(dev_state);
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(dev_state);
++
++    if (get_num_vcpus() > VIRTIO_QUEUE_MAX - LL_NUM_STATIC_QUEUES ||
++        MACHINE(qdev_get_machine())->smp.cpus != MACHINE(qdev_get_machine())->smp.max_cpus) {
++        error_setg(errp, "shadow ABI requires a fixed supported CPU topology");
++        return;
++    }
++    error_setg(&dev->migration_blocker, "shadow ABI migration is not implemented");
++    if (migrate_add_blocker(&dev->migration_blocker, errp) < 0) {
++        return;
++    }
++    /* Keep QEMU's native VFIO/discard exclusion active until the RDM
++     * coordination port has been audited and tested with real DMA. */
++    if (ram_block_discard_require(true)) {
++        error_setg(errp, "shadow ABI does not yet support VFIO/pinned RAM");
++        migrate_del_blocker(&dev->migration_blocker);
++        return;
++    }
++    dev->discard_required = true;
++    // fixed experimental config
++    virtio_init(vdev, VIRTIO_ID_BALLOON, sizeof(struct ll_balloon_config));
++
++    ret = qemu_add_llfree_balloon_handler(ll_balloon_stat, dev);
++
++    if (ret < 0) {
++        error_setg(errp, "Only one llfree balloon device is supported");
++        migrate_del_blocker(&dev->migration_blocker);
++        ram_block_discard_require(false);
++        dev->discard_required = false;
++        virtio_cleanup(vdev);
++        return;
++    }
++
++    if (!virtio_device_ioeventfd_enabled(vdev)) {
++        error_setg(errp, "virtio-llfree-balloon needs ioeventfd!");
++        qemu_remove_llfree_balloon_handler(dev);
++        migrate_del_blocker(&dev->migration_blocker);
++        ram_block_discard_require(false);
++        dev->discard_required = false;
++        virtio_cleanup(vdev);
++        return;
++    }
++
++    dev->nodes = ll_nodes_create();
++
++    ll_init_vqs(vdev, dev);
++    bool success = ll_init_iothread_mapping(dev, errp);
++    if (!success) {
++        if (!dev->iothread_vq_mapping_list)
++            error_setg(errp, "shadow ABI requires iothread-vq-mapping");
++        ll_nodes_destroy(dev->nodes);
++        qemu_remove_llfree_balloon_handler(dev);
++        migrate_del_blocker(&dev->migration_blocker);
++        ram_block_discard_require(false);
++        dev->discard_required = false;
++        virtio_cleanup(vdev);
++        return;
++    }
++
++    qatomic_set(&dev->reclaimed_huge, 0);
++
++    if (virtio_has_feature(dev->host_features, LL_BALLOON_F_AUTO_MODE)) {
++        if (dev->auto_mode_iothread) {
++            dev->auto_mode_timer = aio_timer_new(
++                iothread_get_aio_context(dev->auto_mode_iothread),
++                QEMU_CLOCK_HOST, SCALE_NS, ll_balloon_auto_reclaim, dev);
++        } else {
++            dev->auto_mode_timer =
++                aio_timer_new(qemu_get_aio_context(), QEMU_CLOCK_HOST, SCALE_NS,
++                              ll_balloon_auto_reclaim, dev);
++        }
++
++        ll_schedule_auto_reclaim(dev);
++    }
++
++    // register as a ramdiscard manager to get vfio notifications
++#ifndef CONFIG_SIMULATE_BROKEN_VFIO
++    MachineState *machine = MACHINE(qdev_get_machine());
++    if (memory_region_set_ram_discard_manager(machine->ram, RAM_DISCARD_MANAGER(dev))) {
++        error_setg(errp, "RAM already has a discard manager");
++        return;
++    }
++#endif
++}
++
++static void ll_balloon_device_unrealize(DeviceState *dev_state)
++{
++    VirtIODevice *vdev = VIRTIO_DEVICE(dev_state);
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(dev_state);
++
++    ll_nodes_destroy(dev->nodes);
++
++    qemu_remove_llfree_balloon_handler(dev);
++    migrate_del_blocker(&dev->migration_blocker);
++    if (dev->discard_required) {
++        ram_block_discard_require(false);
++        dev->discard_required = false;
++    }
++
++    virtio_delete_queue(dev->llfree_info_vq);
++    virtio_delete_queue(dev->llfree_request_vq);
++
++    for (uint32_t i = 0; i < get_num_vcpus(); i++) {
++        virtio_delete_queue(dev->llfree_auto_deflate_vqs[i]);
++    }
++
++    g_free(dev->vq_aio_context);
++    dev->vq_aio_context = NULL;
++
++    virtio_cleanup(vdev);
++}
++
++static uint64_t ll_balloon_get_features(VirtIODevice *vdev, uint64_t f,
++                                        Error **errp)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++    return f | dev->host_features | (1ULL << LL_BALLOON_F_SHARED_ABI);
++}
++
++static int ll_balloon_validate_features(VirtIODevice *vdev)
++{
++    if (!virtio_has_feature(vdev->guest_features, LL_BALLOON_F_SHARED_ABI)) {
++        virtio_error(vdev, "shared ABI negotiation is required");
++        return -EINVAL;
++    }
++    return 0;
++}
++
++// for now unused functions, but must exist
++static int ll_balloon_post_load_device(void *opaque, int version_id)
++{
++    return 0;
++}
++
++// called on reboot, multiple times apparently...
++static void ll_balloon_device_reset(VirtIODevice *vdev)
++{
++    VirtIOLLFreeBalloon *dev = VIRTIO_LLFREE_BALLOON(vdev);
++
++    qatomic_set(&dev->reclaimed_huge, 0);
++    // delete all zones, they are no longer valid
++    ll_nodes_destroy(dev->nodes);
++    dev->nodes = ll_nodes_create();
++
++    // ideally we could inflate after a reboot
++    // but for that we would need a different, more appropriate callback
++    return;
++}
++
++static int ll_balloon_set_status(VirtIODevice *vdev, uint8_t status)
++{
++    return 0;
++}
++
++static void ll_balloon_instance_init(Object *obj) { return; }
++
++static const VMStateDescription vmstate_virtio_llfree_balloon_device = {
++    .name = "virtio-llfree-balloon-device",
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .post_load = ll_balloon_post_load_device,
++    .fields =
++        (VMStateField[]){VMSTATE_UINT32(shrink_pagecache, VirtIOLLFreeBalloon),
++                         VMSTATE_END_OF_LIST()},
++};
++
++static const VMStateDescription vmstate_virtio_llfree_balloon = {
++    .name = "virtio-llfree-balloon",
++    .minimum_version_id = 1,
++    .version_id = 1,
++    .fields = (VMStateField[]){VMSTATE_VIRTIO_DEVICE, VMSTATE_END_OF_LIST()},
++};
++
++static const Property virtio_llfree_balloon_properties[] = {
++    DEFINE_PROP_BIT64("auto-mode", VirtIOLLFreeBalloon, host_features,
++                    LL_BALLOON_F_AUTO_MODE, true),
++    DEFINE_PROP_BIT64("vfio", VirtIOLLFreeBalloon, host_features,
++                    LL_BALLOON_F_VFIO, false),
++    DEFINE_PROP_LINK("auto-mode-iothread", VirtIOLLFreeBalloon,
++                     auto_mode_iothread, TYPE_IOTHREAD, IOThread *),
++    DEFINE_PROP_IOTHREAD_VQ_MAPPING_LIST(
++        "iothread-vq-mapping", VirtIOLLFreeBalloon, iothread_vq_mapping_list),
++};
++
++static void ll_balloon_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    VirtioDeviceClass *vdc = VIRTIO_DEVICE_CLASS(klass);
++    RamDiscardManagerClass *rdmc = RAM_DISCARD_MANAGER_CLASS(klass);
++
++    dc->hotpluggable = false;
++    device_class_set_props(dc, virtio_llfree_balloon_properties);
++    dc->vmsd = &vmstate_virtio_llfree_balloon;
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++    vdc->realize = ll_balloon_device_realize;
++    vdc->unrealize = ll_balloon_device_unrealize;
++    vdc->reset = ll_balloon_device_reset;
++    vdc->get_config = ll_balloon_get_config;
++    vdc->set_config = ll_balloon_set_config;
++    vdc->get_features = ll_balloon_get_features;
++    vdc->validate_features = ll_balloon_validate_features;
++    vdc->set_status = ll_balloon_set_status;
++    vdc->start_ioeventfd = balloon_start_ioeventfd;
++    vdc->stop_ioeventfd = balloon_stop_ioeventfd;
++    vdc->vmsd = &vmstate_virtio_llfree_balloon_device;
++
++    rdmc->get_min_granularity = ll_rdm_get_min_granularity;
++    rdmc->is_populated = ll_rdm_is_populated;
++    rdmc->replay_populated = ll_rdm_replay_populated;
++    rdmc->replay_discarded = ll_rdm_replay_discarded;
++    rdmc->register_listener = ll_rdm_register_listener;
++    rdmc->unregister_listener = ll_rdm_unregister_listener;
++}
++
++static const TypeInfo virtio_llfree_balloon_info = {
++    .name = TYPE_VIRTIO_LLFREE_BALLOON,
++    .parent = TYPE_VIRTIO_DEVICE,
++    .instance_size = sizeof(VirtIOLLFreeBalloon),
++    .instance_init = ll_balloon_instance_init,
++    .class_init = ll_balloon_class_init,
++    .interfaces = (InterfaceInfo[]){{TYPE_RAM_DISCARD_MANAGER}, {}},
++};
++
++static void virtio_register_types(void)
++{
++    type_register_static(&virtio_llfree_balloon_info);
++}
++
++type_init(virtio_register_types)
+diff --git a/include/hw/virtio/virtio-llfree-balloon.h b/include/hw/virtio/virtio-llfree-balloon.h
+new file mode 100644
+index 0000000..9e489ef
+--- /dev/null
++++ b/include/hw/virtio/virtio-llfree-balloon.h
+@@ -0,0 +1,61 @@
++/*
++ * Virtio Support
++ *
++ * Copyright IBM, Corp. 2007-2008
++ *
++ * Authors:
++ *  Anthony Liguori   <aliguori@us.ibm.com>
++ *  Rusty Russell     <rusty@rustcorp.com.au>
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2.  See
++ * the COPYING file in the top-level directory.
++ *
++ */
++
++#ifndef QEMU_VIRTIO_LLFREE_BALLOON_H
++#define QEMU_VIRTIO_LLFREE_BALLOON_H
++
++#include <stdint.h>
++
++#include "qemu/typedefs.h"
++#include "standard-headers/linux/virtio_llfree_balloon.h"
++#include "hw/virtio/virtio.h"
++#include "qapi-builtin-types.h"
++#include "qemu/queue.h"
++#include "system/iothread.h"
++#include "qom/object.h"
++#include "qapi/qapi-types-virtio.h"
++#include "llfree_zone.h"
++
++#define TYPE_VIRTIO_LLFREE_BALLOON "virtio-llfree-balloon-device"
++OBJECT_DECLARE_SIMPLE_TYPE(VirtIOLLFreeBalloon, VIRTIO_LLFREE_BALLOON)
++
++/*-----------------------------------------------------------------------------------------------
++| Structs
++-------------------------------------------------------------------------------------------------*/
++struct VirtIOLLFreeBalloon {
++    VirtIODevice parent_obj;
++    VirtQueue *llfree_info_vq;
++    VirtQueue *llfree_request_vq;
++    VirtQueue **llfree_auto_deflate_vqs;
++    uint32_t num_queues;
++    IOThreadVirtQueueMappingList *iothread_vq_mapping_list;
++    AioContext **vq_aio_context;
++    IOThread *auto_mode_iothread;
++    QEMUTimer *auto_mode_timer;
++    ll_nodes_t *nodes;
++    Error *migration_blocker;
++    bool discard_required;
++
++    /* listeners to notify on plug/unplug activity. */
++    QLIST_HEAD(, RamDiscardListener) rdl_list;
++
++    uint64_t reclaimed_huge;
++
++    uint32_t shrink_pagecache;
++    uint32_t pagecache_retries;
++    uint64_t host_features;
++    bool qemu_4_0_config_size;
++};
++
++#endif
+diff --git a/include/standard-headers/linux/virtio_llfree_balloon.h b/include/standard-headers/linux/virtio_llfree_balloon.h
+new file mode 100644
+index 0000000..25c226f
+--- /dev/null
++++ b/include/standard-headers/linux/virtio_llfree_balloon.h
+@@ -0,0 +1,51 @@
++#ifndef _LINUX_VIRTIO_LLFREE_BALLOON_H
++#define _LINUX_VIRTIO_LLFREE_BALLOON_H
++/* This header is BSD licensed so anyone can use the definitions to implement
++ * compatible drivers/servers.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. Neither the name of IBM nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL IBM OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE. */
++#include "standard-headers/linux/types.h"
++#include "standard-headers/linux/virtio_types.h"
++#include "standard-headers/linux/virtio_ids.h"
++#include "standard-headers/linux/virtio_config.h"
++
++/* Private experimental protocol; not a registered virtio device ABI. */
++#define LL_BALLOON_F_SHARED_ABI 63
++#define LL_BALLOON_ABI_MAGIC 0x4c4c4652U
++#define LL_BALLOON_ABI_VERSION 2U
++
++/* The feature bitmap for virtio llfree balloon */
++#define LL_BALLOON_F_SHRINK_PAGECACHE 1
++#define LL_BALLOON_F_AUTO_MODE 4
++#define LL_BALLOON_F_VFIO 6
++// #define LL_BALLOON_F_IOCTL 7
++
++struct ll_balloon_config {
++	uint32_t magic;
++	uint32_t version;
++	/* Number of pages host wants Guest to shrink the pagecache. */
++	uint32_t shrink_pagecache;
++};
++
++#endif /* _LINUX_VIRTIO_LLFREE_BALLOON_H */
+diff --git a/include/system/llfree-balloon.h b/include/system/llfree-balloon.h
+new file mode 100644
+index 0000000..e6484ae
+--- /dev/null
++++ b/include/system/llfree-balloon.h
+@@ -0,0 +1,14 @@
++#ifndef QEMU_LLFREE_BALLOON_H
++#define QEMU_LLFREE_BALLOON_H
++
++#include "system/ram_addr.h"
++#include "exec/cpu-common.h"
++#include "qapi/qapi-types-machine.h"
++
++typedef void(QEMULLfreeBalloonStatus)(void *opaque, LLfreeBalloonInfo *info);
++
++int qemu_add_llfree_balloon_handler(QEMULLfreeBalloonStatus *status_func,
++                                    void *opaque);
++void qemu_remove_llfree_balloon_handler(void *opaque);
++
++#endif
+diff --git a/llfree-qemu/include/llfree_states.h b/llfree-qemu/include/llfree_states.h
+new file mode 100644
+index 0000000..f85a174
+--- /dev/null
++++ b/llfree-qemu/include/llfree_states.h
+@@ -0,0 +1,26 @@
++#pragma once
++
++#include "llfree.h"
++
++typedef struct ll_reclaim_states ll_reclaim_states_t;
++
++ll_reclaim_states_t *ll_reclaim_states_create(size_t frames);
++void ll_reclaim_states_destroy(ll_reclaim_states_t *self);
++
++/// Returns whether a frame is mapped
++bool ll_reclaim_states_is_installed(ll_reclaim_states_t *self, uint64_t frame);
++/// Returns whether a frame is hard-reclaimed (unmapped and unavailable)
++bool ll_reclaim_states_is_hard(ll_reclaim_states_t *self, uint64_t frame);
++/// Returns whether a frame is soft-reclaimed (unmapped but available)
++bool ll_reclaim_states_is_soft(ll_reclaim_states_t *self, uint64_t frame);
++
++/// Mark a given frame as reclaimed
++bool ll_frame_states_hard_reclaim(ll_reclaim_states_t *self, uint64_t frame,
++                                  bool already_soft);
++/// Search a hard-reclaimed frame and mark it soft-reclaimed
++llfree_result_t ll_frame_states_return_next(ll_reclaim_states_t *self);
++
++/// Mark an soft-reclaimed frame as installed and mapped
++bool ll_frame_states_install(ll_reclaim_states_t *self, uint64_t frame);
++/// Search a frame and mark it unmapped
++bool ll_frame_states_soft_reclaim(ll_reclaim_states_t *self, uint64_t frame);
+diff --git a/llfree-qemu/include/llfree_zone.h b/llfree-qemu/include/llfree_zone.h
+new file mode 100644
+index 0000000..2c06e44
+--- /dev/null
++++ b/llfree-qemu/include/llfree_zone.h
+@@ -0,0 +1,53 @@
++#ifndef QEMU_LLFREE_ZONE_H
++#define QEMU_LLFREE_ZONE_H
++
++#include "qemu/osdep.h"
++#include "llfree_states.h"
++#include "llfree.h"
++#include <stdint.h>
++
++#define LL_NODES_MAX 8
++
++// shared with virtio-driver
++typedef enum llfree_zone_type {
++    LL_ZONE_DMA32,
++    LL_ZONE_NORMAL,
++    LL_ZONE_MOVABLE,
++    LL_ZONE_LEN,
++    LLFREE_ZONE_NONE = -1,
++} ll_zone_type_t;
++
++// Managed zone, containing an llfree instance
++typedef struct ll_zone ll_zone_t;
++
++// Managed numa nodes, each containing one or more zones
++typedef struct ll_nodes ll_nodes_t;
++
++ll_nodes_t *ll_nodes_create(void);
++void ll_nodes_destroy(ll_nodes_t *self);
++
++size_t ll_nodes_len(ll_nodes_t *self);
++bool ll_nodes_add_zone(ll_nodes_t *self, void *buffer);
++ll_zone_t *ll_nodes_get_zone(ll_nodes_t *self, size_t node,
++                             ll_zone_type_t zone);
++
++uint32_t ll_zone_buffer_size(void);
++
++llfree_result_t ll_zone_reclaim(ll_zone_t *zone, bool alloc);
++llfree_result_t ll_zone_install(ll_zone_t *zone, uint64_t frame);
++llfree_result_t ll_zone_return(ll_zone_t *zone, uint64_t frame);
++bool ll_zone_is_evicted(ll_zone_t *zone, uint64_t frame);
++
++int64_t ll_zone_free_huge(ll_zone_t *zone);
++uint64_t ll_zone_frames(ll_zone_t *zone);
++uint32_t ll_zone_node(ll_zone_t *zone);
++uint32_t ll_zone_type(ll_zone_t *zone);
++
++ll_reclaim_states_t *ll_zone_states(ll_zone_t *zone);
++int64_t ll_zone_file_pages(ll_zone_t *zone);
++uint64_t ll_zone_start_frame(ll_zone_t *zone);
++
++void ll_zone_lock(ll_zone_t *zone);
++void ll_zone_unlock(ll_zone_t *zone);
++
++#endif
+diff --git a/llfree-qemu/llfree_states.c b/llfree-qemu/llfree_states.c
+new file mode 100644
+index 0000000..0e55b51
+--- /dev/null
++++ b/llfree-qemu/llfree_states.c
+@@ -0,0 +1,174 @@
++#include "llfree_states.h"
++
++#include "llfree.h"
++#include "qemu/osdep.h"
++#include "qapi/error.h"
++#include "qemu/error-report.h"
++
++#include "llfree_platform.h"
++#include "utils.h"
++
++#define LL_BITS 2u
++
++enum ll_reclaim {
++    ll_state_installed,
++    ll_state_soft,
++    ll_state_hard,
++    ll_state_len,
++};
++
++/// each entry contains the states for all huge frames of a tree
++typedef uint16_t ll_reclaim_entry;
++
++struct ll_reclaim_states {
++    ll_reclaim_entry *trees;
++    size_t frames;
++    size_t last_tree;
++};
++
++_Static_assert(sizeof(uint16_t) * 8 / LL_BITS == LLFREE_TREE_CHILDREN,
++               "invalid tree size");
++
++_Static_assert(sizeof(uint8_t) * 8 == LLFREE_TREE_CHILDREN,
++               "invalid tree size");
++
++ll_reclaim_states_t *ll_reclaim_states_create(size_t frames)
++{
++    // only whole huge frames!
++    frames = align_down(frames, 1 << LLFREE_HUGE_ORDER);
++    size_t huge = div_ceil(frames, 1 << LLFREE_HUGE_ORDER);
++    size_t trees = div_ceil(huge, LLFREE_TREE_CHILDREN);
++
++    ll_reclaim_states_t *states = g_malloc(sizeof(ll_reclaim_states_t));
++    g_assert(states != NULL);
++    states->frames = frames;
++    // zero -> mapped
++    states->trees = g_malloc0_n(trees, sizeof(ll_reclaim_entry));
++    states->last_tree = 0;
++    g_assert(states->trees != NULL);
++    return states;
++}
++
++void ll_reclaim_states_destroy(ll_reclaim_states_t *self)
++{
++    g_free(self->trees);
++    g_free(self);
++}
++
++static size_t ll_trees(ll_reclaim_states_t *self)
++{
++    return div_ceil(self->frames, LLFREE_TREE_SIZE);
++}
++
++static enum ll_reclaim state_get(uint16_t states, size_t child)
++{
++    g_assert(child < LLFREE_TREE_CHILDREN);
++    return LL_MASK(LL_BITS) & (states >> (LL_BITS * child));
++}
++static uint16_t state_set(uint16_t states, size_t child, enum ll_reclaim state)
++{
++    uint16_t mask = ~(LL_MASK(LL_BITS) << (2 * child));
++    return (states & mask) | (state << (LL_BITS * child));
++}
++
++static bool ll_state_transition(uint16_t *tree_states, size_t child,
++                                enum ll_reclaim from, enum ll_reclaim to)
++{
++    enum ll_reclaim state = state_get(*tree_states, child);
++    if (state == from) {
++        *tree_states = state_set(*tree_states, child, to);
++        return true;
++    }
++    return false;
++}
++
++static bool ll_state_transition_next(uint16_t *tree_states, size_t *child,
++                                     enum ll_reclaim from, enum ll_reclaim to)
++{
++    for (size_t i = 0; i < LLFREE_TREE_CHILDREN; i++) {
++        enum ll_reclaim state = state_get(*tree_states, i);
++        if (state == from) {
++            *tree_states = state_set(*tree_states, i, to);
++            *child = i;
++            return true;
++        }
++    }
++    return false;
++}
++
++/// If the huge frame is in the `from` state, set it to `to`
++static bool ll_transition(ll_reclaim_states_t *self, uint64_t frame,
++                          enum ll_reclaim from, enum ll_reclaim to)
++{
++    if (frame >= self->frames)
++        return false;
++
++    size_t tree = tree_from_frame(frame);
++    g_assert(tree < ll_trees(self));
++    size_t child = child_from_frame(frame) % LLFREE_TREE_CHILDREN;
++    return ll_state_transition(&self->trees[tree], child, from, to);
++}
++
++/// Find a suitable huge frame that has the `from` state and set it to `to`
++static llfree_result_t ll_transition_next(ll_reclaim_states_t *self,
++                                          enum ll_reclaim from,
++                                          enum ll_reclaim to)
++{
++    size_t offset = self->last_tree;
++    for (size_t i = 0; i < ll_trees(self); i++) {
++        size_t tree = (i + offset) % ll_trees(self);
++        size_t child = 0;
++        if (ll_state_transition_next(&self->trees[tree], &child, from, to)) {
++            self->last_tree = tree;
++            return llfree_ok(frame_from_tree(tree) + frame_from_child(child),
++                             false);
++        }
++    }
++    return llfree_err(LLFREE_ERR_MEMORY);
++}
++
++bool ll_reclaim_states_is_installed(ll_reclaim_states_t *self, uint64_t frame)
++{
++    size_t tree = tree_from_frame(frame);
++    g_assert(tree < ll_trees(self));
++    size_t child = child_from_frame(frame) % LLFREE_TREE_CHILDREN;
++    return state_get(self->trees[tree], child) == ll_state_installed;
++}
++
++bool ll_reclaim_states_is_hard(ll_reclaim_states_t *self, uint64_t frame)
++{
++    size_t tree = tree_from_frame(frame);
++    g_assert(tree < ll_trees(self));
++    size_t child = child_from_frame(frame) % LLFREE_TREE_CHILDREN;
++    return state_get(self->trees[tree], child) == ll_state_hard;
++}
++
++bool ll_reclaim_states_is_soft(ll_reclaim_states_t *self, uint64_t frame)
++{
++    size_t tree = tree_from_frame(frame);
++    g_assert(tree < ll_trees(self));
++    size_t child = child_from_frame(frame) % LLFREE_TREE_CHILDREN;
++    return state_get(self->trees[tree], child) == ll_state_soft;
++}
++
++bool ll_frame_states_hard_reclaim(ll_reclaim_states_t *self, uint64_t frame,
++                                  bool already_soft)
++{
++    enum ll_reclaim from = already_soft ? ll_state_soft : ll_state_installed;
++    return ll_transition(self, frame, from, ll_state_hard);
++}
++
++llfree_result_t ll_frame_states_return_next(ll_reclaim_states_t *self)
++{
++    return ll_transition_next(self, ll_state_hard, ll_state_soft);
++}
++
++bool ll_frame_states_install(ll_reclaim_states_t *self, uint64_t frame)
++{
++    return ll_transition(self, frame, ll_state_soft, ll_state_installed);
++}
++
++bool ll_frame_states_soft_reclaim(ll_reclaim_states_t *self, uint64_t frame)
++{
++    return ll_transition(self, frame, ll_state_installed, ll_state_soft);
++}
+diff --git a/llfree-qemu/llfree_zone.c b/llfree-qemu/llfree_zone.c
+new file mode 100644
+index 0000000..152893b
+--- /dev/null
++++ b/llfree-qemu/llfree_zone.c
+@@ -0,0 +1,253 @@
++#include "llfree_zone.h"
++#include "exec/hwaddr.h"
++#include "llfree.h"
++#include "llfree_inner.h"
++#include "llfree_platform.h"
++#include "qemu/error-report.h"
++#include "qemu/thread.h"
++#include "qemu/typedefs.h"
++#include "qemu/error-report.h"
++#include "hw/core/boards.h"
++#include "system/address-spaces.h"
++
++// shared with virtio-driver
++typedef struct llfree_zone_info {
++    llfree_meta_t llfree_meta;
++    uint32_t start_pfn;
++    uint32_t pages;
++    uint32_t type;
++    uint32_t node;
++    _Atomic(int64_t) *free_pages;
++    _Atomic(int64_t) *file_pages;
++} llfree_zone_info_t;
++
++// Struct used by qemu
++struct ll_zone {
++    llfree_t llfree;
++    uint64_t start_pfn;
++    ll_zone_type_t type;
++    size_t node;
++    _Atomic(int64_t) *free_pages;
++    _Atomic(int64_t) *file_pages;
++    ll_reclaim_states_t *states;
++    QemuMutex lock;
++};
++
++typedef struct ll_node {
++    ll_zone_t *zones[LL_ZONE_LEN];
++} ll_node_t;
++
++struct ll_nodes {
++    ll_node_t nodes[LL_NODES_MAX];
++    size_t nodes_len;
++};
++
++static void *gpa_to_hva(hwaddr gpa, uint64_t size)
++{
++    MemoryRegionSection section;
++    void *addr = NULL;
++    if (!size || (gpa & 7) || gpa > UINT64_MAX - size)
++        return NULL;
++    section = memory_region_find(get_system_memory(), gpa, size);
++    if (section.mr && section.mr == MACHINE(qdev_get_machine())->ram &&
++        memory_region_is_ram(section.mr) && !memory_region_is_rom(section.mr) &&
++        !memory_region_is_romd(section.mr) &&
++        int128_ge(section.size, int128_make64(size))) {
++        addr = memory_region_get_ram_ptr(section.mr) + section.offset_within_region;
++    }
++    if (section.mr)
++        memory_region_unref(section.mr);
++    return addr;
++}
++
++static void writer(void *x, char *s) { info_report("%s", s); }
++
++static ll_zone_t *ll_zone_create(void *buffer)
++{
++    ll_zone_t *zone = g_new0(ll_zone_t, 1);
++    g_assert(zone != NULL);
++
++    llfree_zone_info_t *info = buffer;
++
++    zone->start_pfn = info->start_pfn;
++    zone->node = info->node;
++    zone->type = info->type;
++
++    zone->free_pages = (_Atomic(int64_t) *)gpa_to_hva((hwaddr)info->free_pages,
++                                                      sizeof(_Atomic(int64_t)));
++    if (!zone->free_pages) { g_free(zone); return NULL; }
++    zone->file_pages = (_Atomic(int64_t) *)gpa_to_hva((hwaddr)info->file_pages,
++                                                      sizeof(_Atomic(int64_t)));
++    if (!zone->file_pages) { g_free(zone); return NULL; }
++
++    llfree_meta_size_t sizes = llfree_metadata_size(1, info->pages);
++    llfree_meta_t meta = {
++        .local = aligned_alloc(LLFREE_CACHE_SIZE, sizeof(local_t)),
++        .trees = gpa_to_hva((hwaddr)info->llfree_meta.trees, sizes.trees),
++        .lower = gpa_to_hva((hwaddr)info->llfree_meta.lower, sizes.lower),
++    };
++    if (!meta.local || !meta.trees || !meta.lower) {
++        free(meta.local); g_free(zone); return NULL;
++    }
++    llfree_result_t res =
++        llfree_init(&zone->llfree, 1, info->pages, LLFREE_INIT_NONE, meta);
++
++    if (!llfree_is_ok(res)) { free(meta.local); g_free(zone); return NULL; }
++    llfree_print_debug(&zone->llfree, writer, NULL);
++
++    info_report("setup zone offset=%zu pages=%u", zone->start_pfn, info->pages);
++
++    zone->states = ll_reclaim_states_create(llfree_frames(&zone->llfree));
++
++    qemu_mutex_init(&zone->lock);
++    return zone;
++}
++
++static void ll_zone_destroy(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++
++    ll_reclaim_states_destroy(zone->states);
++    free(llfree_metadata(&zone->llfree).local);
++    qemu_mutex_destroy(&zone->lock);
++    g_free(zone);
++}
++
++ll_nodes_t *ll_nodes_create(void)
++{
++    ll_nodes_t *self = g_new0(ll_nodes_t, 1);
++    self->nodes_len = 0;
++    return self;
++}
++
++void ll_nodes_destroy(ll_nodes_t *self)
++{
++    g_assert(self != NULL);
++    for (size_t node = 0; node < self->nodes_len; node++) {
++        for (ll_zone_type_t zone = 0; zone < LL_ZONE_LEN; zone++) {
++            ll_zone_t *z = ll_nodes_get_zone(self, node, zone);
++            if (z != NULL)
++                ll_zone_destroy(z);
++        }
++    }
++    g_free(self);
++}
++
++size_t ll_nodes_len(ll_nodes_t *self) { return self->nodes_len; }
++
++bool ll_nodes_add_zone(ll_nodes_t *self, void *buffer)
++{
++    llfree_zone_info_t info;
++    memcpy(&info, buffer, sizeof(info));
++    uint64_t limit = (MACHINE(qdev_get_machine())->ram_size + (1ULL << 32)) >> 12;
++    if (info.node >= LL_NODES_MAX || info.type >= LL_ZONE_LEN ||
++        !info.pages || info.pages > limit || (info.start_pfn & 1023) ||
++        self->nodes[info.node].zones[info.type])
++        return false;
++    ll_zone_t *zone = ll_zone_create(&info);
++    if (!zone)
++        return false;
++    self->nodes[zone->node].zones[zone->type] = zone;
++    self->nodes_len = MAX(self->nodes_len, zone->node + 1);
++    return true;
++}
++
++ll_zone_t *ll_nodes_get_zone(ll_nodes_t *self, size_t node, ll_zone_type_t zone)
++{
++    if (zone >= LL_ZONE_LEN)
++        return NULL;
++    if (node < self->nodes_len) {
++        return self->nodes[node].zones[zone];
++    }
++    return NULL;
++}
++
++llfree_result_t ll_zone_reclaim(ll_zone_t *zone, bool hard)
++{
++    g_assert(zone != NULL);
++    llfree_result_t res = llfree_reclaim(&zone->llfree, 0, hard);
++    if (hard && llfree_is_ok(res)) {
++        atomic_fetch_sub(zone->free_pages, 1 << LLFREE_HUGE_ORDER);
++    }
++    return res;
++}
++
++llfree_result_t ll_zone_return(ll_zone_t *zone, uint64_t frame)
++{
++    g_assert(zone != NULL);
++    llfree_result_t res = llfree_return(&zone->llfree, frame);
++    if (llfree_is_ok(res)) {
++        atomic_fetch_add(zone->free_pages, 1 << LLFREE_HUGE_ORDER);
++    }
++    return res;
++}
++
++llfree_result_t ll_zone_install(ll_zone_t *zone, uint64_t frame)
++{
++    g_assert(zone != NULL);
++    return llfree_install(&zone->llfree, frame);
++}
++
++bool ll_zone_is_evicted(ll_zone_t *zone, uint64_t frame)
++{
++    g_assert(zone != NULL);
++    return llfree_is_reclaimed(&zone->llfree, frame);
++}
++
++int64_t ll_zone_free_huge(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return llfree_free_huge(&zone->llfree);
++    // return *zone->info.free_pages >> HUGE_PAGE_ORDER;
++}
++
++uint64_t ll_zone_frames(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return llfree_frames(&zone->llfree);
++}
++
++uint32_t ll_zone_node(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return zone->node;
++}
++
++uint32_t ll_zone_type(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return zone->type;
++}
++
++ll_reclaim_states_t *ll_zone_states(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return zone->states;
++}
++
++uint32_t ll_zone_buffer_size(void) { return sizeof(llfree_zone_info_t); }
++
++int64_t ll_zone_file_pages(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    return atomic_load(zone->file_pages);
++}
++
++uint64_t ll_zone_start_frame(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    // Align to the max allocation size
++    return align_down(zone->start_pfn, 1 << LLFREE_MAX_ORDER);
++}
++
++void ll_zone_lock(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    qemu_mutex_lock(&zone->lock);
++}
++
++void ll_zone_unlock(ll_zone_t *zone)
++{
++    g_assert(zone != NULL);
++    qemu_mutex_unlock(&zone->lock);
++}
+diff --git a/llfree-qemu/meson.build b/llfree-qemu/meson.build
+new file mode 100644
+index 0000000..2cde31f
+--- /dev/null
++++ b/llfree-qemu/meson.build
+@@ -0,0 +1,8 @@
++llfree_qemu_inc = include_directories('include')
++llfree_qemu_inc_dep = declare_dependency(include_directories : llfree_qemu_inc)
++system_llfree_c_ss = ss.source_set()
++system_llfree_c_ss.add(files('llfree_zone.c'))
++system_llfree_c_ss.add(files('llfree_states.c'))
++system_llfree_c_ss.add(llfree_qemu_inc_dep)
++system_llfree_c_ss.add(llfree_c_private_dep)
++system_ss.add_all(system_llfree_c_ss)
+diff --git a/meson.build b/meson.build
+index ab3e97e..0a332df 100644
+--- a/meson.build
++++ b/meson.build
+@@ -2288,6 +2288,8 @@ endif
+ #################
+ 
+ config_host_data = configuration_data()
++have_llfree = get_option('llfree').enabled() and have_system
++config_host_data.set('CONFIG_LLFREE_BALLOON', have_llfree)
+ 
+ config_host_data.set('CONFIG_HAVE_RUST', have_rust)
+ audio_drivers_selected = []
+@@ -3763,7 +3765,14 @@ subdir('dump')
+ subdir('accel')
+ 
+ if have_system
+-  subdir('hw')
++  if have_llfree
++  llfree_c = subproject('llfree-c')
++  llfree_c_public_dep = llfree_c.get_variable('libllc_public_dep')
++  llfree_c_private_dep = llfree_c.get_variable('libllc_private_dep')
++  subdir('llfree-qemu')
++endif
++
++subdir('hw')
+ else
+   subdir('hw/core')
+ endif
+diff --git a/meson_options.txt b/meson_options.txt
+index 31d5916..a2f0b80 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -392,3 +392,5 @@ option('rust', type: 'feature', value: 'disabled',
+        description: 'Rust support')
+ option('strict_rust_lints', type: 'boolean', value: false,
+        description: 'Enable stricter set of Rust warnings')
++
++option('llfree', type: 'feature', value: 'disabled', description: 'Downstream transparent memory reclaim device')
+diff --git a/qapi/machine.json b/qapi/machine.json
+index 685e4e2..ee68a91 100644
+--- a/qapi/machine.json
++++ b/qapi/machine.json
+@@ -2251,3 +2251,44 @@
+ # Since: 1.2
+ ##
+ { 'command': 'query-cpu-definitions', 'returns': ['CpuDefinitionInfo'] }
++
++##
++# @LLfreeBalloonInfo:
++#
++# Downstream reclamation status.
++#
++# @configured: Configured guest capacity in bytes.
++# @discarded-bytes: Discarded bytes, not QEMU process RSS.
++# @protocol-version: Private experimental protocol version.
++# @guest-ready: Whether shared zone metadata has been received.
++#
++# Since: 11.0
++##
++{ 'struct': 'LLfreeBalloonInfo',
++  'data': { 'configured': 'uint64', 'discarded-bytes': 'uint64',
++            'protocol-version': 'uint32', 'guest-ready': 'bool' },
++  'if': 'CONFIG_LLFREE_BALLOON' }
++
++##
++# @query-llfree-balloon:
++#
++# Read downstream reclamation status.
++#
++# Returns: current logical capacity
++#
++# Since: 11.0
++##
++{ 'command': 'query-llfree-balloon', 'returns': 'LLfreeBalloonInfo',
++  'if': 'CONFIG_LLFREE_BALLOON' }
++
++##
++# @llfree-balloon:
++#
++# Hard balloon requests are rejected by the native buddy shadow ABI.
++#
++# @value: hard logical capacity in bytes
++#
++# Since: 11.0
++##
++{ 'command': 'llfree-balloon', 'data': {'value': 'int'},
++  'if': 'CONFIG_LLFREE_BALLOON' }
+diff --git a/scripts/meson-buildoptions.sh b/scripts/meson-buildoptions.sh
+index ca5b113..233b78f 100644
+--- a/scripts/meson-buildoptions.sh
++++ b/scripts/meson-buildoptions.sh
+@@ -344,6 +344,8 @@ _meson_option_parse() {
+     --disable-guest-agent-msi) printf "%s" -Dguest_agent_msi=disabled ;;
+     --enable-hexagon-idef-parser) printf "%s" -Dhexagon_idef_parser=true ;;
+     --disable-hexagon-idef-parser) printf "%s" -Dhexagon_idef_parser=false ;;
++    --enable-llfree) printf "%s" -Dllfree=enabled ;;
++    --disable-llfree) printf "%s" -Dllfree=disabled ;;
+     --enable-hv-balloon) printf "%s" -Dhv_balloon=enabled ;;
+     --disable-hv-balloon) printf "%s" -Dhv_balloon=disabled ;;
+     --enable-hvf) printf "%s" -Dhvf=enabled ;;
+diff --git a/subprojects/llfree-c/meson.build b/subprojects/llfree-c/meson.build
+new file mode 100644
+index 0000000..d5b5e8b
+--- /dev/null
++++ b/subprojects/llfree-c/meson.build
+@@ -0,0 +1,20 @@
++project('llfree-c', 'c')
++
++cflags = ['-std=c11', '-Werror', '-Wunused-variable', '-Wundef', '-Werror=strict-prototypes', '-Wno-trigraphs', '-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=return-type', '-Wno-format-security', '-Werror=unknown-warning-option', '-Werror=ignored-optimization-argument', '-Wno-sign-compare', '-Wno-frame-address', '-Wno-address-of-packed-member', '-Wno-gnu', '-Wno-unused-const-variable', '-Wvla', '-Wno-pointer-sign', '-Wimplicit-fallthrough', '-Werror=date-time', '-Werror=incompatible-pointer-types', '-Wno-initializer-overrides', '-Wno-sign-compare', '-Wno-pointer-to-enum-cast', '-Wno-tautological-constant-out-of-range-compare', '-fPIE', '-pthread']
++
++private_inc = include_directories('llc/src', 'llc/include', 'llc/std')
++pub_inc = include_directories('llc/include', 'llc/std')
++
++sources = ['llc/src/bitfield.c', 'llc/src/child.c', 'llc/src/llfree.c', 'llc/src/local.c', 'llc/src/lower.c', 'llc/src/tree.c']
++
++libllc = static_library('llc',
++                        sources,
++                        include_directories : private_inc,
++                        install : false,
++                        c_args : cflags)
++
++libllc_public_dep = declare_dependency(include_directories : pub_inc,
++                        link_with : [libllc])
++
++libllc_private_dep = declare_dependency(include_directories : private_inc,
++                        link_with : [libllc])
+diff --git a/system/llfree-balloon.c b/system/llfree-balloon.c
+new file mode 100644
+index 0000000..c52c1e4
+--- /dev/null
++++ b/system/llfree-balloon.c
+@@ -0,0 +1,94 @@
++/*
++ * Generic Balloon handlers and management
++ *
++ * Copyright (c) 2003-2008 Fabrice Bellard
++ * Copyright (C) 2011 Red Hat, Inc.
++ * Copyright (C) 2011 Amit Shah <amit.shah@redhat.com>
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this software and associated documentation files (the "Software"), to deal
++ * in the Software without restriction, including without limitation the rights
++ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++ * copies of the Software, and to permit persons to whom the Software is
++ * furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
++ * THE SOFTWARE.
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/atomic.h"
++#include "system/kvm.h"
++#include "system/llfree-balloon.h"
++#include "qapi/error.h"
++#include "qapi/qapi-commands-machine.h"
++#include "qapi/qmp/qerror.h"
++#include "trace.h"
++
++static QEMULLfreeBalloonStatus *ll_balloon_status_fn;
++static void *ll_balloon_opaque;
++
++static bool have_llfree_balloon(Error **errp)
++{
++    if (kvm_enabled() && !kvm_has_sync_mmu()) {
++        error_set(
++            errp, ERROR_CLASS_KVM_MISSING_CAP,
++            "Using KVM without synchronous MMU, llfree balloon unavailable");
++        return false;
++    }
++    if (!ll_balloon_status_fn) {
++        error_set(errp, ERROR_CLASS_DEVICE_NOT_ACTIVE,
++                  "No llfree balloon device has been activated");
++        return false;
++    }
++    return true;
++}
++
++int qemu_add_llfree_balloon_handler(QEMULLfreeBalloonStatus *status_func,
++                                    void *opaque)
++{
++    if (ll_balloon_status_fn || ll_balloon_opaque) {
++        /* We're already registered one balloon handler.  How many can
++         * a guest really have?
++         */
++        return -1;
++    }
++    ll_balloon_status_fn = status_func;
++    ll_balloon_opaque = opaque;
++    return 0;
++}
++
++void qemu_remove_llfree_balloon_handler(void *opaque)
++{
++    if (ll_balloon_opaque != opaque) {
++        return;
++    }
++    ll_balloon_status_fn = NULL;
++    ll_balloon_opaque = NULL;
++}
++
++LLfreeBalloonInfo *qmp_query_llfree_balloon(Error **errp)
++{
++    LLfreeBalloonInfo *info;
++
++    if (!have_llfree_balloon(errp)) {
++        return NULL;
++    }
++
++    info = g_malloc0(sizeof(*info));
++    ll_balloon_status_fn(ll_balloon_opaque, info);
++    return info;
++}
++
++void qmp_llfree_balloon(int64_t target, Error **errp)
++{
++    error_setg(errp, "Hard ballooning is disabled for the native buddy shadow ABI");
++}
+diff --git a/system/meson.build b/system/meson.build
+index 579e835..fe5c56a 100644
+--- a/system/meson.build
++++ b/system/meson.build
+@@ -39,3 +39,7 @@ system_ss.add(when: 'CONFIG_DEVICE_TREE',
+ if host_os == 'linux'
+   system_ss.add(files('async-teardown.c'))
+ endif
++
++if have_llfree
++  system_ss.add(files('llfree-balloon.c'))
++endif
+diff --git a/system/trace-events b/system/trace-events
+index 6d29a82..c5a22b2 100644
+--- a/system/trace-events
++++ b/system/trace-events
+@@ -61,3 +61,5 @@ dirtylimit_vcpu_execute(int cpu_index, int64_t sleep_time_us) "CPU[%d] sleep %"P
+ 
+ # ram-block-attributes.c
+ ram_block_attributes_state_change(uint64_t offset, uint64_t size, const char *from, const char *to) "offset 0x%"PRIx64" size 0x%"PRIx64" from '%s' to '%s'"
++
++llfree_balloon_event(void *opaque, unsigned long target) "opaque %p target %lu"
