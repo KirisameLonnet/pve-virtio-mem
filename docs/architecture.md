@@ -40,3 +40,19 @@ This is source-level integration, not an officially supported PVE plugin API.
 The standard Q35 builder still owns disks, network, firmware, PCI passthrough,
 serial devices and display devices. Their live behavior needs separate guest
 validation; successful Perl loading alone does not prove it.
+
+## Transparent reclamation experiment
+
+Native scheduling decisions and transparent physical-page reclamation are
+separate concerns. The existing adapter changes guest capacity through
+virtio-mem. QEMU 11's VFIO type1 backend blocks uncoordinated page discard and
+supports discard coordinated by RamDiscardManager; the ordinary balloon page
+reporting path observes the discard restriction. See the upstream
+[VFIO implementation](https://github.com/qemu/qemu/blob/v11.0.0/hw/vfio/container-legacy.c)
+and [balloon implementation](https://github.com/qemu/qemu/blob/v11.0.0/hw/virtio/virtio-balloon.c).
+
+The optional [transparent experiment](../experimental/transparent/README.md)
+builds matching research QEMU/guest-kernel sources and checks constant capacity,
+idle-page reclamation and reuse in a new TCG guest. It uses the provider's
+automatic soft-reclamation mechanism rather than translating policy targets
+into hard hotplug limits. It has no production PVE integration yet.

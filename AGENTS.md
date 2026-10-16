@@ -13,6 +13,15 @@ service. These fork instructions supersede conflicting microvm-specific text
 below. Privacy, reversible changes, profiling disposal and Git rules still apply.
 A build/test pass is not evidence of successful live VFIO memory reclamation.
 
+The clarified product target is constant guest-visible configured capacity
+with transparent idle-page reclamation and demand-driven reuse. The packaged
+virtio-mem hotplug backend does not yet implement that experience. Necessary
+QEMU and guest-kernel source changes are authorised for development;
+`experimental/transparent/` is an opt-in, isolated prototype, not a production
+replacement. Preserve native PVE management and scheduling; no custom external
+scheduler or service. Do not claim transparent VFIO support from hotplug,
+fixed capacity, a TCG test or a requested-size value alone.
+
 ---
 
 <!-- RUI-PROFILE-LIFECYCLE-20261005 -->

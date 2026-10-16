@@ -4,6 +4,26 @@ These features are requested follow-up work, not current support. Existing
 guards remain until each combination has an implementation and acceptance
 results. Continue to reuse native PVE scheduling and QEMU memory management.
 
+## Transparent physical-page reclamation
+
+The product target is constant guest-visible configured capacity, demand-driven
+allocation up to that capacity when host resources permit, and automatic
+redistribution of idle physical pages without manual resize steps. The current
+virtio-mem backend implements hotplug and does not meet that target.
+
+Necessary QEMU and guest-kernel changes are in scope. The initial opt-in
+[HyperAlloc-based experiment](../experimental/transparent/README.md) pins
+matching sources and provides an isolated build/acceptance entry point. It
+does not replace the current production backend or establish VFIO acceptance.
+
+Acceptance must additionally show that another isolated VM can consume the
+released host RAM, that reallocating guest pages promptly restores safe CPU
+and DMA mappings, and that live GPU data and workloads survive repeated
+cycles. Do not infer success from a configured maximum, a QMP target, fixed
+minimum/maximum values, or guest counters alone.
+
+## Other compatibility work
+
 | Feature | Implementation and acceptance requirements |
 | --- | --- |
 | hugepages | Select a compatible QEMU backend and block alignment; validate host reservation, real page release and VFIO DMA mapping limits separately for each page size. |
