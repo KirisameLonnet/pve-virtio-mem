@@ -1,9 +1,9 @@
 # Architecture and reuse
 
-The fork reuses pve-microvm's Debian packaging approach, delegated memory
-construction, project scratch resolver and guarded patch/backup/revert model.
-Upstream history, license and author attribution are retained. The fork does
-not install its microvm machine builder, custom kernel, OCI helpers or UI.
+This fork integrates only memory handling into the native Q35 builder.
+Retained upstream source/design reuse and licenses are listed in
+[provenance](provenance.md). Unused machine, image, kernel and UI tooling has
+been removed from the current tree; original Git history remains intact.
 
 QEMU, the Linux virtio_mem driver and VFIO implement memory hot(un)plug and
 page disposal. Proxmox retains VM lifecycle, API permissions, QMP transport,
@@ -23,7 +23,7 @@ Five source patches connect these existing components:
 4. `API2/Qemu.pm` classifies the new option as VM.Config.Memory.
 5. `pve-manager/js/pvemanagerlib.js` extends the native memory editor and
    hardware memory row, including pending/revert handling and permissions.
-   It does not install the inherited microvm UI or a separate settings page.
+   This uses PVE's existing dialog and pending-configuration flow.
 
 The adapter builds one fixed boot backend and one sparse virtio-mem backend
 on NUMA node zero. The PCI device is appended after PVE devices and custom args

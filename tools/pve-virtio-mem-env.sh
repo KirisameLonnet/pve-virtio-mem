@@ -15,9 +15,6 @@ pve_virtio_mem_env() {
     root=$(project_tmp_resolve pve-virtio-mem) || return
     project_tmp_init "$root" || return
     export PROJECT_TMP_ROOT=$root PVE_VIRTIO_MEM_TMP_ROOT=$root
-    export PVE_VIRTIO_MEM_KERNEL_DIR=${PVE_VIRTIO_MEM_KERNEL_DIR:-$root/build/kernel}
-    [[ "$PVE_VIRTIO_MEM_KERNEL_DIR" = "$root/build/"* ]] && project_path_usable "$PVE_VIRTIO_MEM_KERNEL_DIR" \
-        || { echo 'kernel artifacts must be under the project build directory' >&2; return 1; }
     export PVE_VIRTIO_MEM_TEST_DIR="$root/tests" PVE_VIRTIO_MEM_LOG_DIR="$root/logs"
     export PVE_VIRTIO_MEM_CACHE_DIR="$root/cache"
     export PVE_VIRTIO_MEM_BUILD_DIR="$root/build"
@@ -41,17 +38,6 @@ pve_virtio_mem_env() {
     export npm_config_cache="$root/cache/npm" PYTHONPYCACHEPREFIX="$root/cache/python"
     export PYTHONDONTWRITEBYTECODE=1
 
-}
-
-# Host absolute scratch/cache paths cannot be resolved inside the guest rootfs.
-# Keep chroot-created state in the owned rootfs image, with guest /tmp semantics.
-pve_virtio_mem_chroot() {
-    env -u PROJECT_TMP_BASE -u PROJECT_TMP_ROOT -u PROJECT_ORIGINAL_TMPDIR \
-        -u PVE_VIRTIO_MEM_TMP_ROOT -u PVE_VIRTIO_MEM_RUN_DIR -u PVE_VIRTIO_MEM_CACHE_DIR \
-        -u PVE_VIRTIO_MEM_BUILD_DIR -u PVE_VIRTIO_MEM_KERNEL_DIR -u PVE_VIRTIO_MEM_TEST_DIR \
-        -u PVE_VIRTIO_MEM_LOG_DIR -u XDG_CACHE_HOME -u BUN_INSTALL_CACHE_DIR \
-        -u npm_config_cache -u PYTHONPYCACHEPREFIX \
-        TMPDIR=/tmp TMP=/tmp TEMP=/tmp chroot "$@"
 }
 
 if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then

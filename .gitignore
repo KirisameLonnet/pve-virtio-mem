@@ -1,20 +1,15 @@
-debian/pve-microvm/
 debian/.debhelper/
 debian/debhelper-build-stamp
 debian/files
-debian/pve-microvm.debhelper.log
-debian/pve-microvm.substvars
 
 *.deb
 *.buildinfo
 *.changes
 
-kernel/vmlinuz-microvm
-
-# Legacy upstream evidence is not part of the package.
+# Private scratch/evidence must not be published or packaged.
 docs/evidence/
 
-# New package staging (normal builds run outside the checkout).
+# Package staging (normal builds run outside the checkout).
 debian/pve-virtio-mem/
 debian/pve-virtio-mem.debhelper.log
 debian/pve-virtio-mem.substvars

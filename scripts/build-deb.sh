@@ -12,8 +12,7 @@ mkdir -p "$STAGE"
 tar -C "$ROOT" --exclude='./.git' --exclude='./docs/evidence' --exclude='./debian/.debhelper' \
     --exclude='./debian/pve-virtio-mem' --exclude='./debian/files' \
     --exclude='./debian/*.debhelper' --exclude='./debian/*.substvars' \
-    --exclude='./debian/debhelper-build-stamp' --exclude='./kernel/vmlinuz-microvm' \
-    --exclude='./kernel/initrd-microvm' -cf - . | tar -C "$STAGE" -xf -
+    --exclude='./debian/debhelper-build-stamp' -cf - . | tar -C "$STAGE" -xf -
 cd "$STAGE"
 dpkg-buildpackage -us -uc -b
 printf 'Debian output directory: %s\n' "$RUN"

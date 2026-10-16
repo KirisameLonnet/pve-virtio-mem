@@ -13,7 +13,12 @@ The package requires PVE 9, QEMU 10 or newer and qemu-server 9.1.17 or newer.
 Package-copy compatibility was tested with qemu-server 9.1.17 and 9.2.11 only;
 a version constraint is not a guarantee that future source layouts will work.
 The frontend patch and browser fixture were tested with pve-manager 9.2.21.
-It conflicts with pve-microvm because both edit the same PVE source files.
+It conflicts with pve-microvm because both edit the same PVE source files;
+that package is not a dependency. See [provenance](provenance.md).
+
+The development `.deb` installs the hotplug integration only. The separate
+[transparent experiment](../experimental/transparent/README.md) requires
+matching QEMU/guest-kernel sources and is not installed by this package.
 
 ## What installation does
 

@@ -27,7 +27,11 @@ for kind, rows in (('CPU instructions', cpu), ('Allocated bytes/objects', heap))
     out += [f'\n## Largest {kind.lower()} processes\n']
     for score, counts, cmd, path in sorted(rows, key=lambda row: row[0], reverse=True)[:6]:
         value = str(score) if kind.startswith('CPU') else f'{score} / {counts[3]}'
-        out.append(f'* {value}: {cmd[:140]}\n')
+        # Public conclusions must not retain host paths or arbitrary arguments.
+        label = ('perl tests/virtio-mem/adapter.t'
+                 if cmd.endswith('/tests/virtio-mem/adapter.t')
+                 else 'profiled helper (arguments omitted)')
+        out.append(f'* {value}: {label}\n')
         target = Path(str(path) + '.top.txt')
         if not target.exists() or not target.stat().st_size:
             with target.open('w') as stream:

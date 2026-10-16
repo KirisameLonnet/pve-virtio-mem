@@ -21,8 +21,8 @@ memory settings. A pool change requires a full shutdown and start; saving
 the dialog does not restart the guest.
 
 The create-VM wizard is unchanged. Configure an existing stopped VM before
-its first virtio-mem boot. This fork does not package the upstream Create
-µVM button or other microvm UI modifications.
+its first virtio-mem boot. The editor controls the hotplug backend, not the
+separate transparent-reclamation experiment.
 
 See [configuration](configuration.md) for startup/scheduling semantics and
 guest prerequisites. pve-manager upgrades reapply the guarded bundle patch

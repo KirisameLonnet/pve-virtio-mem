@@ -1,7 +1,12 @@
 # Configuration
 
-The new opt-in property is `virtio-mem`, measured in MiB. The existing memory,
-balloon and shares fields keep their PVE meanings:
+The opt-in property is `virtio-mem`, measured in MiB.
+
+These settings control the packaged hotplug backend: guest-visible RAM changes
+with actual plugged memory. They do not enable constant-capacity transparent
+physical reclaim. That remains a [separate experiment](../experimental/transparent/README.md).
+
+The existing memory, balloon and shares fields keep their PVE meanings:
 
 | Property | Meaning |
 | --- | --- |

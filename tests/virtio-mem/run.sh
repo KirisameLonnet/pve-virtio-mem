@@ -6,6 +6,7 @@ perl tests/virtio-mem/adapter.t
 perl tests/virtio-mem/native-contract.t
 python3 tests/virtio-mem/lifecycle.py
 python3 tests/virtio-mem/transparent.py
+bash tests/virtio-mem/paths.sh
 ui_source=$(mktemp "$TMPDIR/pvemanagerlib.XXXXXX")
 trap 'rm -f "$ui_source" "$ui_source.orig" "$ui_source.rej"' EXIT
 cp tests/virtio-mem/fixtures/pvemanagerlib.js "$ui_source"
