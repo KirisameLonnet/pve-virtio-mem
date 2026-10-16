@@ -44,12 +44,17 @@
 apt install ./pve-virtio-mem_*.deb
 ```
 
-软件包会校验、备份并修改 PVE 的 Perl 模块。升级补丁由 dpkg 触发器维护。
+软件包会校验、备份并修改 PVE 的 Perl 模块和原生网页内存编辑器。升级补丁由 dpkg 触发器维护。
 卸载和版本兼容说明见 [安装文档](docs/installation.md)。
 
 ## 配置
 
 内存容量的单位为 MiB。
+
+网页入口：**虚拟机 → 硬件 → 内存 → 编辑**，设置 `virtio-mem (MiB)`；
+最小内存和共享权重沿用原生高级选项。设为 `0` 可禁用，池大小的修改需要完整关机再启动。
+硬件页的内存行会显示池大小及待生效变更，支持原生撤销操作。
+安装后刷新浏览器以加载新编辑器，详见 [网页配置](docs/webui.md)。
 
 | 参数 | 含义 |
 | --- | --- |
@@ -73,6 +78,8 @@ memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotp
 ```
 
 配置完成后启动虚拟机。更改 virtio-mem 池大小需要完整关机再启动。
+启动目标、最小内存、共享权重和调度速率遵循原生 PVE；插件不强制启动扩满或暂停调度。
+`shares=0` 保留原生手动调整行为。底层热插拔仍需客户机驱动完成。
 参数约束和内存在线策略见 [配置文档](docs/configuration.md)。
 
 ## 支持范围
@@ -86,10 +93,11 @@ qemu-server 9.2.11 已完成补丁应用、模块加载和回滚测试。
 目前为开发版本。hugepages、DIMM 内存热插拔、virtio-fs 和 SEV/TDX 暂不支持；
 迁移、HA 和带运行状态的快照尚未验证。客户机中的固定页或不可移动页可能阻止部分内存拔除。
 详细记录见 [已知限制](docs/known-issues.md)。
+hugepages、DIMM 热插拔、virtio-fs 和 SEV/TDX 的后续支持要求见 [路线图](docs/roadmap.md)。
 
 ## 开发
 
-Debian 构建依赖：`build-essential`、`debhelper`、`dpkg-dev`、`fakeroot`、Perl、Python 3、GNU patch。
+Debian 构建依赖：`build-essential`、`debhelper`、`dpkg-dev`、`fakeroot`、Perl、Python 3、GNU patch、Node.js。
 
 ```sh
 make test

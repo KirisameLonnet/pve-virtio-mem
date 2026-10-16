@@ -35,12 +35,22 @@ def atomic_write(path, data, mode=0o644):
             os.unlink(name)
 
 
+def target_package(relative):
+    if '..' not in Path(relative).parts:
+        if relative.startswith('usr/share/perl5/PVE/'):
+            return 'qemu-server'
+        if relative == 'usr/share/pve-manager/js/pvemanagerlib.js':
+            return 'pve-manager'
+    raise RuntimeError('Unexpected patch target')
+
+
 def package_original(root, relative, data):
-    checksums = root / 'var/lib/dpkg/info/qemu-server.md5sums'
+    package = target_package(relative)
+    checksums = root / f'var/lib/dpkg/info/{package}.md5sums'
     wanted = {line.split(None, 1)[1]: line.split(None, 1)[0]
               for line in checksums.read_text().splitlines()}
     if wanted.get(relative) != hashlib.md5(data).hexdigest():
-        raise RuntimeError(f'{relative}: differs from the installed qemu-server package')
+        raise RuntimeError(f'{relative}: differs from the installed {package} package')
 
 
 def main():
@@ -99,8 +109,7 @@ def operate(args, root, state_dir):
         if len(headers) != 1:
             raise RuntimeError(f'{patch.name}: expected one target')
         relative = headers[0]
-        if not relative.startswith('usr/share/perl5/PVE/') or '..' in Path(relative).parts:
-            raise RuntimeError('Unexpected patch target')
+        target_package(relative)
         path = root / relative
         current = path.read_bytes()
         record = state.get(relative)

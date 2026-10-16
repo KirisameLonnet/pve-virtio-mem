@@ -1,3 +1,12 @@
+pve-virtio-mem (0.1.0~alpha3-1) trixie; urgency=medium
+
+  * Add virtio-mem to the native memory editor and pending hardware row.
+  * Guard frontend patches with pve-manager checksums and upgrade triggers.
+  * Preserve native scheduling; allow pending manual target decreases.
+  * Document requested hugepages, DIMM, virtio-fs and SEV/TDX follow-up work.
+
+ -- KirisameLonnet <KirisameLonnet@users.noreply.github.com>  Fri, 16 Oct 2026 08:30:00 +0000
+
 pve-virtio-mem (0.1.0~alpha2-1) trixie; urgency=high
 
   * Append virtio-mem after PVE and custom PCI devices to avoid address clashes.

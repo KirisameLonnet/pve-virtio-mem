@@ -68,8 +68,11 @@ sub translate_balloon {
     return ($execute, $params) if $execute ne 'balloon' || !enabled($conf);
     my ($base, $pool, $maximum, $minimum) = layout($conf);
     my $target = $params->{value};
+    # PVE owns the policy floor. In manual mode its pending-config handler can
+    # send a newly lowered target before the old balloon value is committed.
+    # Enforce physical capacity here, not the previous configuration's target.
     die "virtio-mem target is outside configured capacity\n"
-        if !defined($target) || $target < $minimum * $MIB || $target > $maximum * $MIB;
+        if !defined($target) || $target < $base * $MIB || $target > $maximum * $MIB;
     my $block = $BLOCK_MIB * $MIB;
     my $requested = int(($target - $base * $MIB) / $block) * $block;
     my %args = %$params;
