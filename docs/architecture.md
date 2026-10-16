@@ -52,7 +52,7 @@ reporting path observes the discard restriction. See the upstream
 and [balloon implementation](https://github.com/qemu/qemu/blob/v11.0.0/hw/virtio/virtio-balloon.c).
 
 The optional [transparent experiment](../experimental/transparent/README.md)
-builds matching research QEMU/guest-kernel sources and checks constant capacity,
+builds the QEMU 11/Linux 6.18 source port with native buddy tracking and checks constant capacity,
 idle-page reclamation and reuse in a new TCG guest. It uses the provider's
 automatic soft-reclamation mechanism rather than translating policy targets
 into hard hotplug limits. It has no production PVE integration yet.

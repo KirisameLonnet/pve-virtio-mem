@@ -76,7 +76,8 @@ Guest runtime paths are separate from host development scratch.
 `make transparent-build` and `make transparent-test` are explicit opt-in targets.
 See [the prototype README](../experimental/transparent/README.md) for dependencies,
 source locks, negative control and cleanup. These launch a new isolated TCG guest
-with a matching research kernel. They do not access PVE guests or establish
+with the Linux 6.18 native-buddy shadow tracker and QEMU 11 source port. They
+do not access PVE guests or establish
 VFIO safety, current PVE compatibility or production support.
 
 ## CI and review

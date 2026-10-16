@@ -18,10 +18,12 @@ License: AGPL-3+
  GNU Affero GPL version 3 or later.
  See LICENSES/AGPL-3.0-or-later.txt for the complete license.
 
-Files: experimental/transparent/patches/linux-init-section.patch
+Files: experimental/transparent/patches/*
 Copyright: Lars Wrenger and HyperAlloc/LLFree contributors
+           QEMU and Linux contributors (individual notices retained)
            2026 KirisameLonnet
 License: GPL-2.0-only
- This patch follows the pinned HyperAlloc Linux kernel's COPYING terms.
+ These aggregate source ports follow QEMU/Linux COPYING terms. Original
+ permissive notices embedded in the source patches remain intact.
  See LICENSES/GPL-2.0-only.txt for the complete GNU GPL version 2.
  On Debian systems it is also available at /usr/share/common-licenses/GPL-2.
