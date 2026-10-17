@@ -22,8 +22,7 @@
      balloon => {
          optional => 1,
          type => 'integer',
-@@ -2636,10 +2644,12 @@
- 
+@@ -2637,9 +2644,11 @@
      my $qmpclient = PVE::QMPClient->new();
  
 +    my $virtio_mem_stats = {};
@@ -35,7 +34,7 @@
          return if !$info->{max_mem};
  
          my $d = $res->{$vmid};
-@@ -2719,6 +2729,9 @@
+@@ -2719,6 +2730,9 @@
          $qmpclient->queue_cmd($qmp_peer, $blockstatscb, 'query-blockstats');
          $qmpclient->queue_cmd($qmp_peer, $machinecb, 'query-machines');
          $qmpclient->queue_cmd($qmp_peer, $versioncb, 'query-version');
@@ -45,7 +44,7 @@
          # this fails if balloon driver is not loaded, so this must be
          # the last command (following command are aborted if this fails).
          $qmpclient->queue_cmd($qmp_peer, $ballooncb, 'query-balloon');
-@@ -3794,6 +3807,9 @@
+@@ -3794,6 +3808,9 @@
          my $aa = PVE::Tools::split_args($conf->{args});
          push @$cmd, @$aa;
      }

@@ -16,7 +16,7 @@ Retained upstream components are listed in [provenance](provenance.md).
 | `scripts/` | Isolated package build, real-package checks and pre-release profiling |
 | `experimental/transparent/` | Separate source/build and TCG acceptance prototype |
 
-The Debian package installs the adapter, five integration patches, patch manager
+The Debian package installs the adapter, six integration patches, patch manager
 and package documentation. It does not build or install the research QEMU/kernel.
 There is no legacy kernel or OCI/template build target.
 

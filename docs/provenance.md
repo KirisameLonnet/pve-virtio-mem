@@ -12,7 +12,7 @@ in Git rather than duplicated as current documentation or package changelog.
 | Current component | Retained source or design | Current use |
 | --- | --- | --- |
 | `tools/VirtioMem.pm` | Memory construction derived from `MicroVM.pm` | Fixed boot RAM plus removable pool for the native Q35 builder; native target/statistics adaptation |
-| `tools/pve-virtio-mem-patch` | Preflight, backup, checksum and revert lifecycle model | A scoped implementation for five explicit PVE integration patches, with durable retry/rollback state |
+| `tools/pve-virtio-mem-patch` | Preflight, backup, checksum and revert lifecycle model | A scoped implementation for six explicit PVE integration patches, with durable retry/rollback state |
 | `tools/lib/project-tmp.sh` | Inherited generic project-root resolver | Ownership/symlink checks and portable development scratch selection |
 | `tools/pve-virtio-mem-env.sh`, `tests/virtio-mem/paths.sh` | Adapted environment wrapper and path tests | Fork-specific caches/runs; unused image-chroot and legacy kernel-path interfaces removed |
 | `debian/`, build/profile helpers | Packaging and test-isolation approach | This fork's package lifecycle and disposable test/build/profile data |
@@ -24,8 +24,10 @@ No upstream early-boot patch service or custom scheduler is retained.
 ## Native PVE code
 
 The unified patches in `patches/` contain qemu-server and pve-manager context.
-`tests/virtio-mem/fixtures/` contains native AutoBalloon and memory-editor test
-excerpts. These remain attributed to Proxmox and use AGPL-3.0-or-later, with
+`tests/virtio-mem/fixtures/AutoBalloon.pm` contains the relevant upstream
+`compute_alg1` implementation with the packaged pressure-growth branch for
+contract tests. The scheduler patch itself is a minimal diff against upstream.
+The fixtures remain attributed to Proxmox and use AGPL-3.0-or-later, with
 [the license text](../LICENSES/AGPL-3.0-or-later.txt). PVE continues to own
 scheduling, API permissions, QMP transport, polling and VM lifecycle.
 

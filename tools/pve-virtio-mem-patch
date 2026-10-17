@@ -37,6 +37,8 @@ def atomic_write(path, data, mode=0o644):
 
 def target_package(relative):
     if '..' not in Path(relative).parts:
+        if relative == 'usr/share/perl5/PVE/AutoBalloon.pm':
+            return 'pve-manager'
         if relative.startswith('usr/share/perl5/PVE/'):
             return 'qemu-server'
         if relative == 'usr/share/pve-manager/js/pvemanagerlib.js':

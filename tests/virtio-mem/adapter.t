@@ -77,7 +77,8 @@ $client->[0][1]->(9000,{return=>[
 ]});
 my $info = {actual=>4096*$mib,max_mem=>4096*$mib,total_mem=>6000,free_mem=>2000};
 ok(PVE::QemuServer::VirtioMem::normalize_stats($info,$cache->{9000}),'normalize successful query');
-is_deeply($info,{actual=>6144*$mib,max_mem=>16384*$mib,total_mem=>6000,free_mem=>2000},
+ok($cache->{9000}->{virtio_mem},'QMP statistics identify virtio-mem for native pressure scheduling');
+is_deeply($info,{actual=>6144*$mib,max_mem=>16384*$mib,total_mem=>6000,free_mem=>2000,virtio_mem=>1},
           'use actual size, never requested size; preserve guest counters');
 $client->[0][1]->(9000,{return=>[
     {type=>'virtio-mem',data=>{id=>'vmem0',size=>2048*$mib,'requested-size'=>12288*$mib}},

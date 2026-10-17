@@ -1,5 +1,6 @@
 interest-noawait /usr/share/perl5/PVE/QemuServer.pm
 interest-noawait /usr/share/perl5/PVE/QemuServer/Memory.pm
 interest-noawait /usr/share/perl5/PVE/QemuServer/Monitor.pm
+interest-noawait /usr/share/perl5/PVE/AutoBalloon.pm
 interest-noawait /usr/share/perl5/PVE/API2/Qemu.pm
 interest-noawait /usr/share/pve-manager/js/pvemanagerlib.js

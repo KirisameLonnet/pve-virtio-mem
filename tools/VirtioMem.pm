@@ -96,6 +96,7 @@ sub queue_stats {
             $cache->{$vmid} = {
                 actual => $base * $MIB + $device->{data}->{size},
                 max_mem => $maximum * $MIB,
+                virtio_mem => 1,
             };
         }
     }, 'query-memory-devices');
@@ -109,6 +110,7 @@ sub normalize_stats {
     # remain useful; replace only allocation fields with the device's real size.
     $info->{actual} = $memory->{actual};
     $info->{max_mem} = $memory->{max_mem};
+    $info->{virtio_mem} = 1 if $memory->{virtio_mem};
     return 1;
 }
 

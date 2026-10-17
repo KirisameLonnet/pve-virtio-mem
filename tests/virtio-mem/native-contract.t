@@ -36,7 +36,7 @@ for my $case (
                                   'requested-size'=>$maximum-$base}},
     ]});
     PVE::QemuServer::VirtioMem::normalize_stats($info, $cache->{9000});
-    is_deeply($info, $native_info, "$name: native-equivalent actual/usage counters");
+    is_deeply($info, {%$native_info, virtio_mem=>1}, "$name: native-equivalent actual/usage counters");
     my $make_status = sub {
         my ($stats) = @_;
         return {
@@ -48,7 +48,7 @@ for my $case (
     };
     my $native = PVE::AutoBalloon::compute_alg1($make_status->($native_info), $goal*$mib, 100*$mib);
     my $adapted = PVE::AutoBalloon::compute_alg1($make_status->($info), $goal*$mib, 100*$mib);
-    is_deeply($adapted, $native, "$name: unmodified native scheduler makes identical decisions");
+    is_deeply($adapted, $native, "$name: native decision is unchanged when fast path is inactive");
     if (defined(my $target = $native->{9000})) {
         my ($cmd, $params) = PVE::QemuServer::VirtioMem::translate_balloon(
             $conf, 'balloon', {value=>$target});
@@ -57,5 +57,40 @@ for my $case (
         cmp_ok($effective, '<=', $target, "$name: translated target does not exceed native target");
         cmp_ok($target-$effective, '<', 2*$mib, "$name: difference is less than one device block");
     }
+}
+
+{
+    my $status = {
+        9100 => { balloon=>8*1024*$mib, maxmem=>96*1024*$mib, balloon_min=>8*1024*$mib,
+                  freemem=>1*1024*$mib, shares=>1000, ballooninfo=>{virtio_mem=>1} },
+        9101 => { balloon=>8*1024*$mib, maxmem=>96*1024*$mib, balloon_min=>8*1024*$mib,
+                  freemem=>1*1024*$mib, shares=>1000, ballooninfo=>{} },
+    };
+    my $result = PVE::AutoBalloon::compute_alg1($status, 2*1024*$mib, 100*$mib);
+    cmp_ok($result->{9100} - $status->{9100}->{balloon}, '>', 100*$mib,
+        'virtio-mem pressure receives its shares target in one scheduling pass');
+    cmp_ok($result->{9101} - $status->{9101}->{balloon}, '<=', 100*$mib,
+        'ordinary balloon VM keeps the native growth step');
+    cmp_ok($result->{9100} + $result->{9101} - 16*1024*$mib, '<=', 2*1024*$mib,
+        'fast growth remains bounded by the host allocation goal');
+}
+
+{
+    my $status = {
+        9200 => { balloon=>8*1024*$mib, maxmem=>96*1024*$mib, balloon_min=>8*1024*$mib,
+                  freemem=>4*1024*$mib, shares=>1000, ballooninfo=>{virtio_mem=>1} },
+    };
+    my $result = PVE::AutoBalloon::compute_alg1($status, 2*1024*$mib, 100*$mib);
+    cmp_ok($result->{9200} - $status->{9200}->{balloon}, '<=', 100*$mib,
+        'virtio-mem without guest pressure keeps the native growth step');
+}
+
+{
+    my $status = {
+        9300 => { balloon=>8*1024*$mib, maxmem=>96*1024*$mib, balloon_min=>8*1024*$mib,
+                  freemem=>0, shares=>0, ballooninfo=>{virtio_mem=>1} },
+    };
+    my $result = PVE::AutoBalloon::compute_alg1($status, 2*1024*$mib, 100*$mib);
+    ok(!exists($result->{9300}), 'shares=0 remains manual and disables pressure growth');
 }
 done_testing;
