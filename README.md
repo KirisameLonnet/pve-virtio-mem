@@ -74,6 +74,47 @@ memhp_default_state=online memory_hotplug.online_policy=auto-movable memory_hotp
 
 更多参数和客户机限制见[配置说明](docs/configuration.md)与[网页操作](docs/webui.md)。
 
+## 运行中调整
+
+`virtio-mem` 池大小决定 VM 的容量范围，不能在运行中修改。运行中的扩缩容通过
+`balloon` 目标完成，目标范围是固定启动内存到 `memory`。
+
+手动模式下，在网页中打开 **VM → 硬件 → 内存 → 编辑**，先将 **Shares** 设为 `0`
+并保存，再次打开对话框修改 **Minimum memory** 后保存。此时 Minimum memory 是在线
+调整目标；`virtio-mem (MiB)` 只用于修改池大小，需要完整关机再启动。Shares 非零时，
+Minimum memory 是自动调度的下限，由 pvestatd 决定实际目标。
+
+手动调整时先关闭 AutoBalloon：
+
+```sh
+qm set <vmid> --shares 0
+qm set <vmid> --balloon 8192   # 在线增长到 8 GiB
+qm set <vmid> --balloon 4096   # 在线缩回到 4 GiB
+```
+
+上例假设固定启动内存为 4 GiB，且最大内存至少为 8 GiB。`balloon` 和内存池数值均以
+MiB 表示，并按 2 MiB 对齐。缩容受客户机可移动页限制；不可移动或被固定的页面会使
+请求保持在较高容量。
+
+恢复自动调度：
+
+```sh
+qm set <vmid> --shares 1000
+```
+
+PVE 会在后续 `pvestatd` 采样中按 shares 和宿主内存预算调整目标。virtio-mem 客户机
+空闲内存不高于最低内存的 25% 时，压力扩容可直接使用本轮计算出的增长目标。
+
+检查配置和实际接入量：
+
+```sh
+qm config <vmid> | grep -E '^(memory|balloon|shares|virtio-mem):'
+pvesh get /nodes/<node>/qemu/<vmid>/status/current --output-format json
+```
+
+状态中的 `balloon`/实际内存反映已经接入的容量，不是尚未完成的请求。客户机内可用
+`grep -E 'MemTotal|MemAvailable' /proc/meminfo`确认内存上线；热插和移除都是异步的。
+
 ## 开发
 
 ```sh
