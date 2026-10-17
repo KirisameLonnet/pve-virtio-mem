@@ -32,7 +32,8 @@ QEMU、qemu-server 和 pve-manager 的版本要求见[安装文档](docs/install
 
 ## 安装
 
-项目目前提供开发预览包。下载 GitHub Actions 生成的 `.deb`，在每个可能运行该 VM
+项目目前提供开发预览包。从 [GitHub Actions](https://github.com/KirisameLonnet/pve-virtio-mem/actions/workflows/ci.yml)
+下载生成的 `.deb`，在每个可能运行该 VM
 的 PVE 节点安装：
 
 ```sh
