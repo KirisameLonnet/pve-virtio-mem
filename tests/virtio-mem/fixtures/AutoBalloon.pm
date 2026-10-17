@@ -1,4 +1,4 @@
-# Unmodified Proxmox pve-manager 9.2.21 scheduling implementation.
+# Proxmox pve-manager AutoBalloon with the packaged virtio-mem pressure fast path.
 # Copyright Proxmox Server Solutions GmbH; AGPL-3.0-or-later.
 package PVE::AutoBalloon;
 
@@ -55,7 +55,15 @@ sub compute_alg1 {
 
                 my ($new, $balloon);
                 if (($bytes > 0) && ($desired - $d->{balloon}) > 0) { # grow
-                    $new = $d->{balloon} + $maxchange;
+                    my $grow_step = $maxchange;
+                    if (
+                        $d->{ballooninfo}->{virtio_mem}
+                        && defined($d->{freemem})
+                        && ($d->{freemem} <= $d->{balloon_min} * 0.25)
+                    ) {
+                        $grow_step = $d->{maxmem};
+                    }
+                    $new = $d->{balloon} + $grow_step;
                     $balloon = $new > $desired ? $desired : $new;
                 } elsif (($desired - $d->{balloon}) < 0) { # shrink
                     $new = $d->{balloon} - $maxchange;

@@ -33,9 +33,18 @@ those prerequisites separately. The create-VM wizard is unchanged.
 The plugin follows native PVE startup targets and scheduling. The initial
 allocation is the configured balloon target, or maximum RAM when that property
 is absent. The native startup balloon command is unchanged. PVE owns minimum
-targets, host-pressure policy, shares, scheduling intervals and rate limits.
-In particular, the native 100 MiB scheduling step can make a large increase
-slow; the plugin does not force maximum allocation or pause scheduling.
+targets, host-pressure policy, shares and scheduling intervals. When measured
+guest free memory is at or below 25% of the configured minimum, a virtio-mem VM
+can receive its shares- and host-budget-limited growth target in one scheduler
+pass. Ordinary balloon VMs retain PVE's 100 MiB growth step; shrink decisions
+also retain that step. `shares=0` disables automatic growth.
+
+This reacts to sampled guest memory pressure; it is not an application request
+or a reservation of the configured maximum. The pvestatd sampling interval
+still applies, and a workload that makes a sudden large allocation can fail
+before the guest onlines added memory. The guest sees only memory actually
+plugged, so software that rejects a VM based on its initial `MemTotal` may still
+need an adequate boot/minimum allocation.
 
 `shares=0` retains PVE's manual allocation behavior. Lowering that target live
 must be allowed even while the old value remains in the active config; the

@@ -1,0 +1,13 @@
+--- a/usr/share/perl5/PVE/AutoBalloon.pm
++++ b/usr/share/perl5/PVE/AutoBalloon.pm
+@@ -58 +58,9 @@
+-                    $new = $d->{balloon} + $maxchange;
++                    my $grow_step = $maxchange;
++                    if (
++                        $d->{virtio_mem}
++                        && defined($d->{freemem})
++                        && ($d->{freemem} <= $d->{balloon_min} * 0.25)
++                    ) {
++                        $grow_step = $d->{maxmem};
++                    }
++                    $new = $d->{balloon} + $grow_step;

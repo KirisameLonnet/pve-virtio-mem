@@ -9,26 +9,32 @@ QEMU, the Linux virtio_mem driver and VFIO implement memory hot(un)plug and
 page disposal. Proxmox retains VM lifecycle, API permissions, QMP transport,
 asynchronous polling, RRD updates and the AutoBalloon scheduling policy.
 
-Five source patches connect these existing components:
+Six source patches connect these existing components:
 
 1. `QemuServer/Memory.pm` delegates only opted-in memory construction.
 2. `QemuServer/Monitor.pm` translates native balloon commands into QMP qom-set.
 3. `QemuServer.pm` registers the pool option and adds query-memory-devices to
    its existing QMP queue, before query-balloon. Statistics use actual plugged
    memory, never merely requested memory. The existing guest total/free
-   counters are retained. Native startup targets, scheduling eligibility,
-   shares and rate limits are unchanged. Policy minimums remain PVE's concern;
-   the command translator checks physical capacity so live manual target
-   decreases can be applied before pending configuration is committed.
-4. `API2/Qemu.pm` classifies the new option as VM.Config.Memory.
-5. `pve-manager/js/pvemanagerlib.js` extends the native memory editor and
+   counters are retained. PVE keeps startup targets, scheduling eligibility,
+   host budget, shares and minimums. Its AutoBalloon growth step is expanded
+   only for a virtio-mem VM whose measured guest free memory is at or below 25%
+   of its configured minimum; other guests and all shrink decisions keep the
+   native step. The command translator checks physical capacity so live manual
+   target decreases can be applied before pending configuration is committed.
+4. `PVE/AutoBalloon.pm` uses a larger per-VM growth step only when the guest
+   reports low free memory and the VM is opted into virtio-mem.
+5. `API2/Qemu.pm` classifies the new option as VM.Config.Memory.
+6. `pve-manager/js/pvemanagerlib.js` extends the native memory editor and
    hardware memory row, including pending/revert handling and permissions.
    This uses PVE's existing dialog and pending-configuration flow.
 
 The adapter builds one fixed boot backend and one sparse virtio-mem backend
 on NUMA node zero. The PCI device is appended after PVE devices and custom args
 so QEMU's automatic address allocator respects their existing reservations. It subtracts fixed boot RAM from each native total-RAM
-target. It does not modify pvestatd or PVE::AutoBalloon and has no event loop.
+target. A small extension to PVE::AutoBalloon lets a pressure VM consume its
+already-calculated native allocation target in one pass; this adds no scheduler,
+polling loop or guest agent. The normal pvestatd sampling interval still applies.
 
 The package lifecycle tool runs GNU patch with zero fuzz and uses Python's
 standard library for checksums, locking and a durable rollback journal. It

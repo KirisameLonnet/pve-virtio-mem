@@ -43,7 +43,9 @@ class Lifecycle(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(''.join(f'{hashlib.md5(data).hexdigest()}  {name}\n'
                                     for name, data in self.originals.items()
-                                    if ('/pve-manager/' in name) == (package == 'pve-manager')))
+                                    if (name.startswith('usr/share/pve-manager/')
+                                        or name == 'usr/share/perl5/PVE/AutoBalloon.pm')
+                                    == (package == 'pve-manager')))
 
     def run_tool(self, action, success=True):
         result = subprocess.run([sys.executable, str(REPO/'tools/pve-virtio-mem-patch'),

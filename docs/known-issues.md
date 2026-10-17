@@ -43,8 +43,10 @@ Requested hugepages, DIMM hotplug, virtio-fs and SEV/TDX compatibility work is
 tracked in the [roadmap](roadmap.md); none is enabled by the GUI addition.
 
 The GUI and live manual-target decrease fix require new live acceptance.
-Earlier live validation above predates these changes. Offline adapter tests
-do not establish guest onlining or VFIO RAM reclamation for a new workload.
+Earlier live validation above predates these changes. The pressure-triggered
+growth fast path is covered by synthetic native-scheduler tests; it has not yet
+been tested on a live PVE node. Offline tests do not establish guest onlining,
+expansion latency or VFIO RAM reclamation for a new workload.
 
 Software-copy tests: qemu-server 9.1.17 and 9.2.11 loaded with PVE dependencies;
 apply twice and hash-verified rollback succeeded. QEMU 11.0 accepted a paused
@@ -58,8 +60,9 @@ No real guest was started during that check.
 The native memory editor was exercised in a browser with extracted
 pve-manager 9.2.21, ExtJS and widget-toolkit assets and synthetic form data.
 Loading, saving, disabling and validation passed. Native scheduler contract
-tests use the unmodified AutoBalloon implementation with equivalent status
-inputs; they do not establish identical guest hotplug latency.
+tests compare unchanged VM decisions to upstream AutoBalloon and separately
+cover virtio-mem pressure growth, host-budget bounds, ordinary VM step limits,
+and manual shares behavior. They do not establish live guest hotplug latency.
 
 ## PCI device placement
 
